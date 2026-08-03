@@ -1,0 +1,64 @@
+# ═══════════════════════════════════════════════════════════════════
+# HORIZONTES — Scoring diario automatizado
+# Reemplaza a la Edge Function Deno del roadmap: corre el pipeline
+# Python canónico todos los días a las 00:30 hora Argentina (UTC-3).
+#
+# Setup (una sola vez) — ver SETUP_AUTOMATIZACION.md:
+#   1. Repo privado en GitHub con el código de Horizontes.
+#   2. Settings → Secrets and variables → Actions → New repository secret:
+#        SUPABASE_URL                  → https://hfrliueqvwnqmdehonvr.supabase.co
+#        SUPABASE_SERVICE_ROLE_KEY     → clave LEGACY JWT (eyJhbGci...) ⚠️
+#        EODHD_API_KEY                 → (opcional, si usás EODHD)
+#   3. Pestaña Actions → habilitar workflows.
+#   ⚠️ Si tu CachedScoringPipeline.from_env() lee otros nombres de env,
+#      ajustá el bloque `env:` de abajo para que coincidan.
+# ═══════════════════════════════════════════════════════════════════
+name: Horizontes — Scoring diario
+
+on:
+  schedule:
+    # 03:30 UTC = 00:30 Argentina (UTC-3). Cron de Actions corre en UTC.
+    # Nota: GitHub puede demorar el disparo algunos minutos en horas pico.
+    - cron: "30 3 * * *"
+  workflow_dispatch: {}   # disparo manual desde la pestaña Actions
+
+concurrency:
+  group: horizontes-scoring
+  cancel-in-progress: false
+
+jobs:
+  scoring:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout del código
+        uses: actions/checkout@v4
+
+      - name: Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Instalar dependencias
+        run: pip install -r requirements.txt
+
+      - name: Ejecutar scoring de la cartera
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          EODHD_API_KEY: ${{ secrets.EODHD_API_KEY }}
+          # Cartera y perfiles editables sin tocar código:
+          # HORIZONTES_TICKERS: "GOOGL.BA,MELI.BA,NVDA.BA"
+          # HORIZONTES_PERFILES: "moderado"
+          HORIZONTES_MIN_EXITO: "80"
+        run: python run_daily_scoring.py
+
+      - name: Publicar resumen de la corrida
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: scoring-run-summary
+          path: scoring_run_summary.json
+          retention-days: 30

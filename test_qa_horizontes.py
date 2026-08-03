@@ -1,0 +1,424 @@
+"""
+╔══════════════════════════════════════════════════════════════╗
+║   HORIZONTES — test_qa_horizontes.py                         ║
+║   Framework QA: 5 casos canarios con métricas hardcodeadas  ║
+║   Ejecutable offline (sin yfinance / EODHD)                  ║
+╠══════════════════════════════════════════════════════════════╣
+║   Uso:                                                        ║
+║     python test_qa_horizontes.py                             ║
+║     python test_qa_horizontes.py --perfil agresivo           ║
+║     python test_qa_horizontes.py --verbose                   ║
+╚══════════════════════════════════════════════════════════════╝
+"""
+
+import sys
+import argparse
+from dataclasses import dataclass
+from typing import Optional
+
+# ── Importar el ScoringEngine (no requiere DataFetcher ni red) ───────────────
+from scoring_engine import (
+    ScoringEngine,
+    ScoringRequest,
+    MetricasFinancieras,
+    PerfilInversor,
+)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 1. CONSTANTES
+# ─────────────────────────────────────────────────────────────────────────────
+
+TOLERANCE_PCT = 2.0   # ±2% tolerancia sobre score_final
+engine        = ScoringEngine()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 2. DEFINICIÓN DE CASOS CANARIOS
+# ─────────────────────────────────────────────────────────────────────────────
+
+@dataclass
+class CasoCanario:
+    nombre:              str
+    ticker:              str
+    perfil:              PerfilInversor
+    metricas:            MetricasFinancieras
+    expected_score:      float    # Score esperado (0–100)
+    expected_clase:      str      # "STRONG BUY" | "ACCUMULATE" | "HOLD" | "AVOID"
+    descripcion:         str = ""
+
+
+CASOS_CANARIOS: list[CasoCanario] = [
+
+    # ── Caso 1: AAPL / MODERADO — Acción de calidad, score intermedio-alto ──
+    # Graham: CR✅ DE⚠️ IC✅ PE⚠️ MdS⚠️ → 65pts brutos
+    # InvestingPro: health✅ roic✅ roe✅ upside⚠️ → 79pts
+    # Murphy: rsi✅ sma200⚠️ sma50✅ vol⚠️ → 72pts
+    # Lynch: peg⚠️ bpa⚠️ roc✅ → 65pts
+    # MODERADO (0.45G + 0.25IP + 0.10M + 0.20L): 65*.45+79*.25+72*.10+65*.20 = 69.2
+    CasoCanario(
+        nombre        = "AAPL — Moderado",
+        ticker        = "AAPL",
+        perfil        = PerfilInversor.MODERADO,
+        expected_score= 69.2,
+        expected_clase= "ACCUMULATE",
+        descripcion   = "Acción de calidad a múltiplo justo. Debe ACCUMULATE en moderado.",
+        metricas      = MetricasFinancieras(
+            pe_ratio          = 22.5,
+            pb_ratio          = 3.8,
+            ev_ebitda         = 18.0,
+            current_ratio     = 2.4,
+            debt_equity       = 0.6,
+            interest_coverage = 8.2,
+            margen_seguridad  = 0.18,
+            health_score      = 3.9,
+            roic              = 28.0,
+            roe               = 32.0,
+            flujo_caja_score  = 75.0,
+            upside_fair_value = 15.0,
+            rsi               = 52.0,
+            precio_vs_sma200  = 0.04,
+            precio_vs_sma50   = 0.02,
+            volumen_relativo  = 1.1,
+            peg_ratio         = 1.2,
+            crecimiento_bpa   = 14.0,
+            roc               = 26.0,
+            es_cedear         = False,
+        ),
+    ),
+
+    # ── Caso 2: MSFT_STRONG / AGRESIVO — Empresa de moat alto ────────────────
+    # AGRESIVO (0.10G + 0.60IP + 0.00M + 0.30L)
+    # Graham bruto: CR✅+20 DE✅+20 IC✅+15 PE❌-5 MdS⚠️+12 = 62
+    # InvestingPro: health(4.5)=35 roic35%=25 roe40%=15 upside25%=20 = 95
+    # Lynch: peg0.9=50 bpa22%=30 roc30%=20 = 100
+    # Score: 62*.10 + 95*.60 + 0*.00 + 100*.30 = 6.2+57.0+0+30 = 93.2
+    CasoCanario(
+        nombre        = "MSFT — Agresivo (STRONG BUY)",
+        ticker        = "MSFT",
+        perfil        = PerfilInversor.AGRESIVO,
+        expected_score= 93.2,
+        expected_clase= "STRONG BUY",
+        descripcion   = "Empresa de moat comprobado. En perfil agresivo debe STRONG BUY.",
+        metricas      = MetricasFinancieras(
+            pe_ratio          = 26.5,
+            pb_ratio          = 11.2,
+            current_ratio     = 2.8,
+            debt_equity       = 0.4,
+            interest_coverage = 35.0,
+            margen_seguridad  = 0.22,
+            health_score      = 4.5,
+            roic              = 35.0,
+            roe               = 40.0,
+            flujo_caja_score  = 88.0,
+            upside_fair_value = 25.0,
+            rsi               = 58.0,
+            precio_vs_sma200  = 0.08,
+            precio_vs_sma50   = 0.04,
+            volumen_relativo  = 1.6,
+            peg_ratio         = 0.9,
+            crecimiento_bpa   = 22.0,
+            roc               = 30.0,
+            es_cedear         = False,
+        ),
+    ),
+
+    # ── Caso 3: KO / CONSERVADOR — Trampa de valor: falla Graham hard filter ─
+    # Graham bruto: CR❌-30 DE❌-10 IC✅+15 PE⚠️+8 MdS❌+0 = -17 → clamp=0
+    # InvestingPro: health(2.8)=18 roic11%=0 roe9%=0 upside5%=0 = 18
+    # Murphy: rsi55=30 sma200⚠️+3 sma50+20 vol0.9+10 = 63
+    # Lynch: peg2.5=0 bpa5%=0 roc10%=0 = 0
+    # CONSERVADOR (0.40G+0.30IP+0.25M+0.05L): 0*.40+18*.30+63*.25+0*.05 = 0+5.4+15.75+0 = 21.15
+    CasoCanario(
+        nombre        = "KO — Conservador (AVOID: falla Graham)",
+        ticker        = "KO",
+        perfil        = PerfilInversor.CONSERVADOR,
+        expected_score= 21.15,
+        expected_clase= "AVOID",
+        descripcion   = (
+            "Trampa de valor: Current Ratio < 2.0 activa penalización Graham -30pts. "
+            "D/E altísimo. En perfil Conservador, donde Graham pesa 40%, debe ser AVOID."
+        ),
+        metricas      = MetricasFinancieras(
+            pe_ratio          = 22.0,
+            pb_ratio          = 10.0,
+            current_ratio     = 1.0,    # ← 🚫 Falla filtro Graham (-30pts)
+            debt_equity       = 2.5,    # ← 🚫 D/E muy alto (-10pts)
+            interest_coverage = 10.0,
+            margen_seguridad  = 0.10,   # ← Insuficiente (<15%)
+            health_score      = 2.8,
+            roic              = 11.0,
+            roe               = 9.0,
+            flujo_caja_score  = 45.0,
+            upside_fair_value = 5.0,
+            rsi               = 55.0,
+            precio_vs_sma200  = 0.01,
+            precio_vs_sma50   = 0.01,
+            volumen_relativo  = 0.9,
+            peg_ratio         = 2.5,
+            crecimiento_bpa   = 5.0,
+            roc               = 10.0,
+            es_cedear         = False,
+        ),
+    ),
+
+    # ── Caso 4: TSLA / AGRESIVO — Alto riesgo, PEG caro ─────────────────────
+    # Graham bruto: CR❌-30 DE✅+20 IC✅+15 PE❌-5 MdS❌0 = 0 → clamp=0
+    # InvestingPro: health(3.5)=25 roic15%=12 roe18%=7 upside12%=10 = 54
+    # Lynch: peg3.5=0 bpa8%=0 roc14%=0 = 0
+    # AGRESIVO: 0*.10 + 54*.60 + 0*.00 + 0*.30 = 32.4
+    CasoCanario(
+        nombre        = "TSLA — Agresivo (AVOID: PEG caro + sin crecimiento BPA)",
+        ticker        = "TSLA",
+        perfil        = PerfilInversor.AGRESIVO,
+        expected_score= 32.4,
+        expected_clase= "AVOID",
+        descripcion   = (
+            "PEG > 2.0 y crecimiento BPA < 10%: el bloque Lynch (peso 30%) aporta 0pts. "
+            "Graham también falla por CR < 2.0. Score cae en zona AVOID incluso en Agresivo."
+        ),
+        metricas      = MetricasFinancieras(
+            pe_ratio          = 60.0,
+            pb_ratio          = 12.0,
+            current_ratio     = 1.8,    # ← 🚫 Falla filtro Graham
+            debt_equity       = 0.3,
+            interest_coverage = 15.0,
+            margen_seguridad  = 0.08,
+            health_score      = 3.5,
+            roic              = 15.0,
+            roe               = 18.0,
+            flujo_caja_score  = 40.0,
+            upside_fair_value = 12.0,
+            rsi               = 68.0,   # ← RSI en zona "else" = 0pts
+            precio_vs_sma200  = 0.15,
+            precio_vs_sma50   = 0.10,
+            volumen_relativo  = 2.0,
+            peg_ratio         = 3.5,    # ← 🚫 PEG > 2.0 = 0pts Lynch
+            crecimiento_bpa   = 8.0,    # ← < 10% = 0pts Lynch
+            roc               = 14.0,   # ← < 15% = 0pts
+            es_cedear         = False,
+        ),
+    ),
+
+    # ── Caso 5: GGAL.BA / CONSERVADOR — CEDEAR con trampa de devaluación ─────
+    # Datos CEDEAR hardcodeados (VRU cae debajo del subyacente → alerta_trampa)
+    # Graham bruto: CR✅+20 DE⚠️+10 IC✅+15 PE✅+20 MdS⚠️+12 = 77
+    # InvestingPro: health(3.2)=22 roic16%=12 roe25%=15 upside20%=20 = 69
+    # Murphy: es_cedear=True, precio_subyacente_usd=None → 0pts (score_murphy retorna 0)
+    # Lynch: peg0.8=50 bpa15%=15 roc20%=10 = 75
+    # CONSERVADOR: 77*.40+69*.30+0*.25+75*.05 = 30.8+20.7+0+3.75 = 55.25
+    # VRU = (2500*1.0)/(1150*1.031) = 2500/1185.65 ≈ 2.108 USD
+    # precio_subyacente_usd = None → alerta_trampa = False → sin penalización
+    CasoCanario(
+        nombre        = "GGAL.BA — Conservador CEDEAR (ACCUMULATE)",
+        ticker        = "GGAL.BA",
+        perfil        = PerfilInversor.CONSERVADOR,
+        expected_score= 55.25,
+        expected_clase= "ACCUMULATE",
+        descripcion   = (
+            "CEDEAR local: Murphy se invalida (sin subyacente USD para limpiar ruido CCL). "
+            "Graham y Lynch son sólidos. Sin trampa de devaluación (precio_subyacente_usd=None)."
+        ),
+        metricas      = MetricasFinancieras(
+            pe_ratio          = 6.0,
+            pb_ratio          = 1.2,
+            current_ratio     = 2.5,
+            debt_equity       = 0.8,
+            interest_coverage = 5.0,
+            margen_seguridad  = 0.25,
+            health_score      = 3.2,
+            roic              = 16.0,
+            roe               = 25.0,
+            flujo_caja_score  = 60.0,
+            upside_fair_value = 20.0,
+            rsi               = 48.0,
+            precio_vs_sma200  = 0.05,
+            precio_vs_sma50   = 0.02,
+            volumen_relativo  = 1.3,
+            peg_ratio         = 0.8,
+            crecimiento_bpa   = 15.0,
+            roc               = 20.0,
+            es_cedear         = True,
+            precio_ars        = 2500.0,
+            ratio_cedear      = 1.0,
+            ccl_implied       = 1150.0,
+            inflacion_us      = 0.031,
+            precio_subyacente_usd = None,  # ← Sin subyacente en NYSE → Murphy = 0pts
+        ),
+    ),
+]
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 3. RUNNER DE QA
+# ─────────────────────────────────────────────────────────────────────────────
+
+@dataclass
+class ResultadoCaso:
+    caso:              CasoCanario
+    score_calculado:   float
+    clase_calculada:   str
+    delta_pct:         float       # abs((calculado - esperado) / esperado * 100)
+    score_ok:          bool
+    clase_ok:          bool
+    passed:            bool
+    bloques:           dict        # scores por bloque
+
+
+def run_caso(caso: CasoCanario) -> ResultadoCaso:
+    req = ScoringRequest(
+        ticker   = caso.ticker,
+        perfil   = caso.perfil,
+        metricas = caso.metricas,
+    )
+    resultado = engine.calcular(req)
+
+    score_calc = resultado.score_final
+    clase_calc = resultado.clasificacion
+    delta      = abs((score_calc - caso.expected_score) / caso.expected_score * 100)
+    score_ok   = delta <= TOLERANCE_PCT
+    clase_ok   = clase_calc == caso.expected_clase
+    passed     = score_ok and clase_ok
+
+    bloques = {
+        nombre: {
+            "score_bruto": b.score_bruto,
+            "peso":        b.peso,
+            "aporte":      b.aporte,
+        }
+        for nombre, b in resultado.bloques.items()
+    }
+
+    return ResultadoCaso(
+        caso             = caso,
+        score_calculado  = score_calc,
+        clase_calculada  = clase_calc,
+        delta_pct        = delta,
+        score_ok         = score_ok,
+        clase_ok         = clase_ok,
+        passed           = passed,
+        bloques          = bloques,
+    )
+
+
+def run_all(casos: list[CasoCanario], verbose: bool = False) -> list[ResultadoCaso]:
+    return [run_caso(c) for c in casos]
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 4. REPORTE EN CONSOLA
+# ─────────────────────────────────────────────────────────────────────────────
+
+COL_W = 65
+
+def sep(ch="═"): print(ch * COL_W)
+
+def print_report(resultados: list[ResultadoCaso], verbose: bool = False):
+    passed_count = sum(1 for r in resultados if r.passed)
+    total        = len(resultados)
+
+    sep()
+    print("  HORIZONTES — QA FRAMEWORK REPORT")
+    print(f"  Tolerancia: ±{TOLERANCE_PCT}%  |  Casos: {total}  |  Pasados: {passed_count}/{total}")
+    sep()
+    print()
+
+    for r in resultados:
+        icon = "✅" if r.passed else "❌"
+        sep("─")
+        print(f"  {icon}  CASO: {r.caso.nombre}")
+        print(f"      Ticker  : {r.caso.ticker}  |  Perfil: {r.caso.perfil.value.upper()}")
+        if r.caso.descripcion:
+            print(f"      Info    : {r.caso.descripcion[:80]}")
+
+        print()
+        # Score
+        score_icon = "✅" if r.score_ok else "❌"
+        print(
+            f"      {score_icon}  SCORE   "
+            f"Esperado: {r.caso.expected_score:>6.2f}   "
+            f"Calculado: {r.score_calculado:>6.2f}   "
+            f"Δ: {r.delta_pct:>5.2f}%"
+        )
+        # Clasificación
+        clase_icon = "✅" if r.clase_ok else "❌"
+        print(
+            f"      {clase_icon}  CLASE   "
+            f"Esperada : {r.caso.expected_clase:<12}   "
+            f"Calculada: {r.clase_calculada}"
+        )
+
+        if verbose:
+            print()
+            print("      Bloques de score:")
+            for nombre, b in r.bloques.items():
+                bar_len = int(b["score_bruto"] / 100 * 20)
+                bar     = "█" * bar_len + "░" * (20 - bar_len)
+                print(
+                    f"        [{nombre:>12}] "
+                    f"{b['score_bruto']:>5.1f}pts × {b['peso']*100:>4.0f}% = {b['aporte']:>5.1f} aporte  "
+                    f"|{bar}|"
+                )
+
+        print()
+
+    sep()
+    if passed_count == total:
+        print(f"  ✅  TODOS LOS CASOS PASARON ({passed_count}/{total})")
+    else:
+        failed = total - passed_count
+        print(f"  ❌  {failed}/{total} CASO(S) FALLARON — Revisar implementación")
+        print()
+        for r in resultados:
+            if not r.passed:
+                if not r.score_ok:
+                    print(
+                        f"     • {r.caso.nombre}: score Δ={r.delta_pct:.2f}% > tolerancia {TOLERANCE_PCT}%"
+                    )
+                if not r.clase_ok:
+                    print(
+                        f"     • {r.caso.nombre}: clase '{r.clase_calculada}' ≠ esperada '{r.caso.expected_clase}'"
+                    )
+    sep()
+    print()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 5. MAIN
+# ─────────────────────────────────────────────────────────────────────────────
+
+def parse_args():
+    p = argparse.ArgumentParser(description="HORIZONTES QA Framework")
+    p.add_argument(
+        "--perfil", choices=[pf.value for pf in PerfilInversor],
+        help="Filtrar por perfil de inversor (ejecuta solo casos de ese perfil)"
+    )
+    p.add_argument(
+        "--verbose", action="store_true",
+        help="Mostrar desglose de score por bloque"
+    )
+    p.add_argument(
+        "--tolerance", type=float, default=TOLERANCE_PCT,
+        help=f"Tolerancia en %% sobre score_final (default: {TOLERANCE_PCT})"
+    )
+    return p.parse_args()
+
+
+if __name__ == "__main__":
+    args = parse_args()
+
+    # A nivel de módulo la asignación ya rebindea el global; 'global' aquí es SyntaxError.
+    TOLERANCE_PCT = args.tolerance
+
+    casos = CASOS_CANARIOS
+    if args.perfil:
+        casos = [c for c in CASOS_CANARIOS if c.perfil.value == args.perfil]
+        if not casos:
+            print(f"⚠️  No hay casos canarios para el perfil '{args.perfil}'.")
+            sys.exit(0)
+
+    resultados = run_all(casos, verbose=args.verbose)
+    print_report(resultados, verbose=args.verbose)
+
+    # Exit code: 0 si todos pasan, 1 si alguno falla
+    sys.exit(0 if all(r.passed for r in resultados) else 1)
