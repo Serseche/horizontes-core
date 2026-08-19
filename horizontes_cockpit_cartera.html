@@ -1,0 +1,1307 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>HORIZONTES · Asistente de Cartera v1</title>
+
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600&family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
+
+<script src="https://unpkg.com/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js"></script>
+
+<style>
+  /* ───── Design Tokens ───────────────────────────────────────────────── */
+  :root {
+    --bg-deep:        #07090d;
+    --bg-panel:       #0d1118;
+    --bg-panel-2:     #11161f;
+    --bg-elevated:    #161c27;
+    --border:         rgba(255,255,255,0.06);
+    --border-strong:  rgba(255,255,255,0.12);
+
+    --text-bright:    #e8edf5;
+    --text:           #b6c0cf;
+    --text-dim:       #6b7787;
+    --text-faint:     #3d4654;
+
+    --cyan:           #22d3ee;
+    --cyan-soft:      rgba(34,211,238,0.10);
+    --green:          #4ade80;
+    --green-soft:     rgba(74,222,128,0.10);
+    --amber:          #fbbf24;
+    --amber-soft:     rgba(251,191,36,0.10);
+    --red:            #f87171;
+    --red-soft:       rgba(248,113,113,0.10);
+    --violet:         #a78bfa;
+
+    --mono:           'Space Mono', ui-monospace, monospace;
+    --serif:          'Fraunces', Georgia, serif;
+    --sans:           'Inter', system-ui, sans-serif;
+
+    --glow-cyan:      0 0 24px rgba(34,211,238,0.18);
+    --glow-amber:     0 0 24px rgba(251,191,36,0.18);
+    --glow-red:       0 0 24px rgba(248,113,113,0.18);
+    --glow-green:     0 0 24px rgba(74,222,128,0.18);
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  html, body {
+    background: var(--bg-deep);
+    color: var(--text);
+    font-family: var(--sans);
+    font-size: 14px;
+    line-height: 1.5;
+    min-height: 100vh;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* ambient grain */
+  body::before {
+    content: '';
+    position: fixed; inset: 0;
+    background-image:
+      radial-gradient(ellipse at 20% 0%, rgba(34,211,238,0.04), transparent 50%),
+      radial-gradient(ellipse at 80% 100%, rgba(167,139,250,0.04), transparent 50%);
+    pointer-events: none;
+    z-index: 0;
+  }
+  body::after {
+    content: '';
+    position: fixed; inset: 0;
+    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='200' height='200'><filter id='n'><feTurbulence baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 0 0.04 0'/></filter><rect width='200' height='200' filter='url(%23n)'/></svg>");
+    opacity: 0.6;
+    mix-blend-mode: overlay;
+    pointer-events: none;
+    z-index: 1;
+  }
+
+  .app {
+    position: relative;
+    z-index: 2;
+    max-width: 1480px;
+    margin: 0 auto;
+    padding: 22px 28px 80px;
+  }
+
+  /* ───── TOP BAR ──────────────────────────────────────────────────────── */
+  .topbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 0 24px;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 28px;
+  }
+  .brand {
+    display: flex; align-items: baseline; gap: 14px;
+    font-family: var(--mono);
+    font-size: 12px;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+  }
+  .brand .logo {
+    color: var(--cyan);
+    font-weight: 700;
+    font-size: 13px;
+    text-shadow: var(--glow-cyan);
+  }
+  .brand .module { color: var(--text); }
+  .brand .ver { color: var(--text-faint); font-size: 10px; }
+
+  .topbar-right { display: flex; align-items: center; gap: 18px; font-family: var(--mono); font-size: 11px; }
+  .live-dot {
+    display: inline-flex; align-items: center; gap: 7px;
+    color: var(--green);
+  }
+  .live-dot::before {
+    content: ''; width: 7px; height: 7px; border-radius: 50%;
+    background: var(--green); box-shadow: var(--glow-green);
+    animation: pulse 1.6s infinite;
+  }
+  @keyframes pulse {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50%      { opacity: 0.4; transform: scale(0.8); }
+  }
+  .ts { color: var(--text-dim); }
+  .user-tag {
+    padding: 4px 10px;
+    background: rgba(34,211,238,0.08);
+    border: 1px solid rgba(34,211,238,0.2);
+    border-radius: 4px;
+    color: var(--cyan);
+    font-size: 10px;
+    letter-spacing: 0.1em;
+  }
+
+  /* ───── PAGE HEADER ──────────────────────────────────────────────────── */
+  .page-header { margin-bottom: 28px; }
+  .eyebrow {
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 0.2em;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    margin-bottom: 8px;
+  }
+  .page-title {
+    font-family: var(--serif);
+    font-size: 38px;
+    font-weight: 500;
+    letter-spacing: -0.02em;
+    color: var(--text-bright);
+    line-height: 1.1;
+  }
+  .page-title em {
+    font-style: italic;
+    color: var(--cyan);
+    font-weight: 400;
+  }
+  .page-sub {
+    margin-top: 10px;
+    font-size: 14px;
+    color: var(--text-dim);
+    max-width: 620px;
+    line-height: 1.6;
+  }
+
+  /* ───── MAIN GRID ────────────────────────────────────────────────────── */
+  .main-grid {
+    display: grid;
+    grid-template-columns: 1.4fr 1fr;
+    gap: 18px;
+    margin-bottom: 18px;
+  }
+
+  /* ─── PORTFOLIO PANEL ───────────────────────────────────────────────── */
+  .panel {
+    background: var(--bg-panel);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    overflow: hidden;
+  }
+  .panel-head {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 14px 18px;
+    border-bottom: 1px solid var(--border);
+  }
+  .panel-head .label {
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 0.18em;
+    color: var(--text-dim);
+    text-transform: uppercase;
+  }
+  .panel-head .label::before {
+    content: '// ';
+    color: var(--cyan);
+  }
+  .panel-head .badge {
+    font-family: var(--mono);
+    font-size: 10px;
+    padding: 3px 9px;
+    border-radius: 3px;
+    border: 1px solid;
+    letter-spacing: 0.1em;
+  }
+  .badge-ok { color: var(--green); border-color: rgba(74,222,128,0.3); background: var(--green-soft); }
+  .badge-warn { color: var(--amber); border-color: rgba(251,191,36,0.3); background: var(--amber-soft); }
+  .badge-info { color: var(--cyan); border-color: rgba(34,211,238,0.3); background: var(--cyan-soft); }
+
+  /* portfolio summary */
+  .pf-summary {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr 1fr;
+    border-bottom: 1px solid var(--border);
+  }
+  .pf-stat {
+    padding: 18px 20px;
+    border-right: 1px solid var(--border);
+  }
+  .pf-stat:last-child { border-right: none; }
+  .pf-stat-label {
+    font-family: var(--mono);
+    font-size: 9px;
+    color: var(--text-dim);
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    margin-bottom: 8px;
+  }
+  .pf-stat-val {
+    font-family: var(--mono);
+    font-size: 22px;
+    color: var(--text-bright);
+    font-weight: 700;
+    letter-spacing: -0.02em;
+  }
+  .pf-stat-delta {
+    font-family: var(--mono);
+    font-size: 11px;
+    margin-top: 4px;
+  }
+  .delta-pos { color: var(--green); }
+  .delta-neg { color: var(--red); }
+
+  /* holdings table */
+  .holdings {
+    padding: 4px 0 0;
+  }
+  .h-row {
+    display: grid;
+    grid-template-columns: 100px 80px 80px 90px 90px 1fr 70px;
+    align-items: center;
+    padding: 11px 18px;
+    border-bottom: 1px solid var(--border);
+    font-family: var(--mono);
+    font-size: 12px;
+    transition: background 0.15s ease;
+  }
+  .h-row:hover { background: rgba(255,255,255,0.02); }
+  .h-row.head {
+    color: var(--text-dim);
+    font-size: 9px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    padding: 9px 18px;
+    background: rgba(255,255,255,0.015);
+  }
+  .h-ticker { color: var(--text-bright); font-weight: 700; }
+  .h-ticker .tag-cedear {
+    display: inline-block;
+    margin-left: 6px;
+    padding: 1px 5px;
+    background: rgba(167,139,250,0.12);
+    color: var(--violet);
+    font-size: 8px;
+    border-radius: 2px;
+    letter-spacing: 0.1em;
+  }
+  .h-num { color: var(--text); }
+  .h-bar-wrap {
+    height: 5px;
+    background: rgba(255,255,255,0.04);
+    border-radius: 3px;
+    overflow: hidden;
+    position: relative;
+  }
+  .h-bar {
+    height: 100%;
+    border-radius: 3px;
+  }
+  .h-bar.good { background: linear-gradient(90deg, var(--green), rgba(74,222,128,0.5)); }
+  .h-bar.mid { background: linear-gradient(90deg, var(--amber), rgba(251,191,36,0.5)); }
+  .h-bar.bad { background: linear-gradient(90deg, var(--red), rgba(248,113,113,0.5)); }
+  .h-signal-ind {
+    width: 6px; height: 6px; border-radius: 50%;
+    display: inline-block;
+  }
+  .signal-strong-buy { background: var(--green); box-shadow: var(--glow-green); }
+  .signal-accumulate { background: var(--cyan); box-shadow: var(--glow-cyan); }
+  .signal-hold { background: var(--text-dim); }
+  .signal-avoid { background: var(--red); box-shadow: var(--glow-red); }
+  .signal-anti-panic { background: var(--amber); box-shadow: var(--glow-amber); animation: pulse 1.6s infinite; }
+
+  .h-action {
+    text-align: right;
+    color: var(--cyan);
+    cursor: pointer;
+    font-size: 11px;
+  }
+  .h-action:hover { color: var(--text-bright); text-shadow: var(--glow-cyan); }
+  .h-row.selected { background: rgba(34,211,238,0.04); }
+  .h-row.selected .h-ticker { color: var(--cyan); }
+
+  /* ─── SIGNALS FEED ──────────────────────────────────────────────────── */
+  .signals-feed {
+    display: flex; flex-direction: column;
+    max-height: 540px;
+    overflow-y: auto;
+  }
+  .signals-feed::-webkit-scrollbar { width: 6px; }
+  .signals-feed::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 3px; }
+
+  .signal-card {
+    padding: 16px 18px;
+    border-bottom: 1px solid var(--border);
+    cursor: pointer;
+    transition: all 0.18s ease;
+    position: relative;
+  }
+  .signal-card:hover { background: rgba(255,255,255,0.02); }
+  .signal-card.active { background: rgba(34,211,238,0.04); }
+  .signal-card.active::before {
+    content: '';
+    position: absolute; left: 0; top: 0; bottom: 0;
+    width: 2px;
+    background: var(--cyan);
+    box-shadow: var(--glow-cyan);
+  }
+
+  .signal-row1 {
+    display: flex; align-items: center; justify-content: space-between;
+    margin-bottom: 6px;
+  }
+  .signal-clase {
+    font-family: var(--mono);
+    font-size: 9px;
+    padding: 2px 7px;
+    letter-spacing: 0.12em;
+    border-radius: 2px;
+  }
+  .clase-strong-buy { color: var(--green); background: var(--green-soft); border: 1px solid rgba(74,222,128,0.25); }
+  .clase-accumulate { color: var(--cyan); background: var(--cyan-soft); border: 1px solid rgba(34,211,238,0.25); }
+  .clase-avoid { color: var(--red); background: var(--red-soft); border: 1px solid rgba(248,113,113,0.25); }
+  .clase-anti-panic { color: var(--amber); background: var(--amber-soft); border: 1px solid rgba(251,191,36,0.25); }
+  .clase-esperar { color: var(--text-dim); background: rgba(255,255,255,0.04); border: 1px solid var(--border-strong); }
+
+  .signal-time {
+    font-family: var(--mono);
+    font-size: 9px;
+    color: var(--text-faint);
+    letter-spacing: 0.06em;
+  }
+  .signal-ticker {
+    font-family: var(--mono);
+    font-size: 16px;
+    color: var(--text-bright);
+    font-weight: 700;
+    letter-spacing: -0.01em;
+    margin-bottom: 6px;
+  }
+  .signal-ticker .conviction {
+    font-size: 11px;
+    color: var(--text-dim);
+    font-weight: 400;
+    margin-left: 8px;
+  }
+  .signal-ticker .conviction strong {
+    color: var(--text-bright);
+    font-weight: 700;
+  }
+  .signal-reason {
+    font-family: var(--serif);
+    font-size: 13px;
+    font-style: italic;
+    color: var(--text);
+    line-height: 1.45;
+    font-weight: 400;
+  }
+  .signal-meta {
+    display: flex; gap: 14px;
+    margin-top: 10px;
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--text-dim);
+  }
+  .signal-meta span strong { color: var(--text); }
+
+  /* ─── DETAIL PANEL (Capsule View) ───────────────────────────────────── */
+  .detail-panel {
+    background: var(--bg-panel);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    overflow: hidden;
+  }
+  .detail-header {
+    padding: 22px 26px;
+    border-bottom: 1px solid var(--border);
+    background: linear-gradient(180deg, rgba(34,211,238,0.03), transparent);
+    display: grid;
+    grid-template-columns: 1fr 280px;
+    gap: 30px;
+    align-items: start;
+  }
+  .detail-title-block .eyebrow-detail {
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--cyan);
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    margin-bottom: 10px;
+    display: flex; align-items: center; gap: 10px;
+  }
+  .detail-title-block .eyebrow-detail::after {
+    content: ''; flex: 1;
+    height: 1px; background: linear-gradient(90deg, rgba(34,211,238,0.3), transparent);
+  }
+  .detail-title {
+    font-family: var(--serif);
+    font-size: 28px;
+    font-weight: 500;
+    color: var(--text-bright);
+    letter-spacing: -0.02em;
+    line-height: 1.15;
+    margin-bottom: 14px;
+  }
+  .detail-narrative {
+    font-family: var(--serif);
+    font-size: 14px;
+    line-height: 1.7;
+    color: var(--text);
+    font-style: italic;
+    border-left: 2px solid var(--cyan);
+    padding-left: 14px;
+  }
+  .detail-narrative .author {
+    display: block;
+    margin-top: 8px;
+    font-size: 11px;
+    font-style: normal;
+    color: var(--text-dim);
+    font-family: var(--mono);
+    letter-spacing: 0.1em;
+  }
+
+  .position-card {
+    padding: 16px;
+    background: var(--bg-elevated);
+    border: 1px solid var(--border-strong);
+    border-radius: 8px;
+  }
+  .position-card .pcard-label {
+    font-family: var(--mono);
+    font-size: 9px;
+    color: var(--text-dim);
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    margin-bottom: 10px;
+  }
+  .position-row {
+    display: flex; justify-content: space-between;
+    padding: 6px 0;
+    font-family: var(--mono);
+    font-size: 12px;
+    border-bottom: 1px dashed var(--border);
+  }
+  .position-row:last-child { border-bottom: none; }
+  .position-row .key { color: var(--text-dim); }
+  .position-row .val { color: var(--text-bright); font-weight: 700; }
+  .position-row .val.green { color: var(--green); }
+  .position-row .val.red { color: var(--red); }
+
+  /* CHART */
+  .chart-container {
+    padding: 20px 26px;
+    border-bottom: 1px solid var(--border);
+  }
+  .chart-meta {
+    display: flex; align-items: center; justify-content: space-between;
+    margin-bottom: 12px;
+  }
+  .chart-meta .legend {
+    display: flex; gap: 18px;
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--text-dim);
+    letter-spacing: 0.06em;
+  }
+  .chart-meta .legend span { display: flex; align-items: center; gap: 6px; }
+  .legend-dot { width: 8px; height: 2px; display: inline-block; }
+  .ld-price { background: var(--cyan); }
+  .ld-sma50 { background: var(--amber); }
+  .ld-sma200 { background: var(--violet); }
+  .ld-rsi { background: var(--green); }
+  .chart-meta .timeframe {
+    display: flex; gap: 4px;
+  }
+  .tf-btn {
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--text-dim);
+    font-family: var(--mono);
+    font-size: 10px;
+    padding: 4px 10px;
+    border-radius: 3px;
+    cursor: pointer;
+    letter-spacing: 0.06em;
+  }
+  .tf-btn.active {
+    color: var(--cyan);
+    border-color: rgba(34,211,238,0.4);
+    background: var(--cyan-soft);
+  }
+  .tf-btn:hover { color: var(--text); border-color: var(--border-strong); }
+
+  #price-chart { width: 100%; height: 280px; }
+  #rsi-chart { width: 100%; height: 100px; margin-top: 6px; }
+
+  .chart-annotation {
+    margin-top: 10px;
+    padding: 10px 14px;
+    background: rgba(34,211,238,0.04);
+    border-left: 2px solid var(--cyan);
+    border-radius: 0 4px 4px 0;
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--text);
+    line-height: 1.5;
+  }
+  .chart-annotation strong { color: var(--cyan); }
+
+  /* BLOCKS */
+  .blocks-row {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    border-bottom: 1px solid var(--border);
+  }
+  .block-cell {
+    padding: 16px 20px;
+    border-right: 1px solid var(--border);
+  }
+  .block-cell:last-child { border-right: none; }
+  .block-cell .blabel {
+    font-family: var(--mono);
+    font-size: 9px;
+    color: var(--text-dim);
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    margin-bottom: 8px;
+  }
+  .block-cell .bscore {
+    font-family: var(--mono);
+    font-size: 22px;
+    font-weight: 700;
+    color: var(--text-bright);
+    margin-bottom: 4px;
+  }
+  .block-cell .bweight {
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--text-dim);
+  }
+  .block-cell .bweight strong { color: var(--text); }
+  .block-cell .bbar {
+    height: 3px;
+    background: rgba(255,255,255,0.05);
+    margin-top: 10px;
+    border-radius: 2px;
+    overflow: hidden;
+  }
+  .block-cell .bbar-fill {
+    height: 100%;
+    transition: width 1s ease;
+  }
+  .bbar-graham { background: var(--cyan); }
+  .bbar-investingpro { background: var(--green); }
+  .bbar-lynch { background: var(--violet); }
+  .bbar-murphy { background: var(--amber); }
+
+  /* DECISION CAPSULE */
+  .capsule {
+    padding: 22px 26px;
+  }
+  .capsule .clabel {
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 0.18em;
+    color: var(--cyan);
+    text-transform: uppercase;
+    margin-bottom: 14px;
+  }
+  .capsule .clabel::before { content: '⚙ '; }
+
+  .capsule textarea {
+    width: 100%;
+    background: var(--bg-elevated);
+    border: 1px solid var(--border-strong);
+    border-radius: 6px;
+    padding: 14px;
+    font-family: var(--serif);
+    font-style: italic;
+    font-size: 14px;
+    color: var(--text-bright);
+    resize: vertical;
+    min-height: 80px;
+    line-height: 1.6;
+  }
+  .capsule textarea:focus {
+    outline: none;
+    border-color: var(--cyan);
+    box-shadow: 0 0 0 3px rgba(34,211,238,0.08);
+  }
+  .capsule textarea::placeholder {
+    color: var(--text-faint);
+    font-style: italic;
+  }
+
+  .capsule-actions {
+    display: flex; gap: 10px;
+    margin-top: 14px;
+  }
+  .btn {
+    padding: 10px 20px;
+    border-radius: 6px;
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    cursor: pointer;
+    border: 1px solid transparent;
+    transition: all 0.15s ease;
+  }
+  .btn-primary {
+    background: var(--cyan);
+    color: var(--bg-deep);
+    font-weight: 700;
+  }
+  .btn-primary:hover { box-shadow: var(--glow-cyan); }
+  .btn-ghost {
+    background: transparent;
+    color: var(--text-dim);
+    border-color: var(--border-strong);
+  }
+  .btn-ghost:hover { color: var(--text); border-color: var(--text-dim); }
+  .btn-warn {
+    background: transparent;
+    color: var(--amber);
+    border-color: rgba(251,191,36,0.3);
+  }
+  .btn-warn:hover { background: var(--amber-soft); }
+
+  .capsule-note {
+    margin-top: 12px;
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--text-faint);
+    line-height: 1.6;
+  }
+  .capsule-note strong { color: var(--text-dim); }
+
+  /* ─── BOTTOM IMPORT BAR ─────────────────────────────────────────────── */
+  .import-bar {
+    margin-top: 18px;
+    background: var(--bg-panel);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 18px 22px;
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 18px;
+  }
+  .import-bar .ibhead {
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--text-dim);
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    margin-bottom: 4px;
+  }
+  .import-bar .ibtitle {
+    font-family: var(--serif);
+    font-size: 18px;
+    color: var(--text-bright);
+    font-weight: 500;
+  }
+  .import-bar .ibtitle em { color: var(--cyan); font-style: italic; }
+  .import-options {
+    display: flex; gap: 10px;
+  }
+  .iopt {
+    padding: 12px 18px;
+    background: var(--bg-elevated);
+    border: 1px solid var(--border-strong);
+    border-radius: 7px;
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--text);
+    cursor: pointer;
+    display: flex; flex-direction: column; gap: 3px;
+    min-width: 140px;
+    transition: all 0.18s ease;
+  }
+  .iopt:hover {
+    border-color: var(--cyan);
+    background: rgba(34,211,238,0.04);
+    transform: translateY(-1px);
+  }
+  .iopt-icon { font-size: 14px; color: var(--cyan); }
+  .iopt-label { color: var(--text-bright); font-weight: 700; letter-spacing: 0.04em; }
+  .iopt-meta { color: var(--text-dim); font-size: 9px; letter-spacing: 0.06em; }
+
+  /* responsive */
+  @media (max-width: 1100px) {
+    .main-grid { grid-template-columns: 1fr; }
+    .detail-header { grid-template-columns: 1fr; }
+    .blocks-row { grid-template-columns: repeat(2, 1fr); }
+    .pf-summary { grid-template-columns: repeat(2, 1fr); }
+    .pf-stat:nth-child(2n) { border-right: none; }
+  }
+</style>
+</head>
+<body>
+<div class="app">
+
+  <!-- TOP BAR -->
+  <div class="topbar">
+    <div class="brand">
+      <span class="logo">◆ HORIZONTES</span>
+      <span class="module">· ASISTENTE DE CARTERA</span>
+      <span class="ver">// V1.0 · ADVISORY</span>
+    </div>
+    <div class="topbar-right">
+      <span class="user-tag">PERFIL: MODERADO</span>
+      <span class="live-dot">REALTIME</span>
+      <span class="ts" id="clock">19:42:18 UTC-3</span>
+    </div>
+  </div>
+
+  <!-- PAGE HEADER -->
+  <div class="page-header">
+    <div class="eyebrow">Cockpit · Buenos Aires · 24 abril 2026</div>
+    <div class="page-title">Tu cartera, <em>analizada con criterio</em></div>
+    <div class="page-sub">
+      El sistema cruzó tus tenencias con el motor Graham + Murphy + Lynch + InvestingPro de las últimas 24h.
+      <strong style="color: var(--text);">3 señales activas</strong> requieren tu atención. Vos decidís.
+    </div>
+  </div>
+
+  <!-- MAIN GRID: Portfolio + Signals -->
+  <div class="main-grid">
+
+    <!-- PORTFOLIO PANEL -->
+    <div class="panel">
+      <div class="panel-head">
+        <div class="label">Mi Cartera · 7 posiciones</div>
+        <div class="badge badge-info">SUPABASE · SYNC HACE 12 MIN</div>
+      </div>
+
+      <div class="pf-summary">
+        <div class="pf-stat">
+          <div class="pf-stat-label">Capital total</div>
+          <div class="pf-stat-val">$48,210</div>
+          <div class="pf-stat-delta delta-pos">+ $1,847 (+3.98%)</div>
+        </div>
+        <div class="pf-stat">
+          <div class="pf-stat-label">Score promedio</div>
+          <div class="pf-stat-val">62.4</div>
+          <div class="pf-stat-delta" style="color: var(--text-dim);">↑ 2.1 vs sem.</div>
+        </div>
+        <div class="pf-stat">
+          <div class="pf-stat-label">Exposición CEDEAR</div>
+          <div class="pf-stat-val">38%</div>
+          <div class="pf-stat-delta" style="color: var(--violet);">CCL $1,338</div>
+        </div>
+        <div class="pf-stat">
+          <div class="pf-stat-label">Salud Graham</div>
+          <div class="pf-stat-val" style="color: var(--green);">72</div>
+          <div class="pf-stat-delta delta-pos">5/7 cumplen filtros</div>
+        </div>
+      </div>
+
+      <div class="holdings">
+        <div class="h-row head">
+          <span>TICKER</span>
+          <span>%CART</span>
+          <span>P&amp;L</span>
+          <span>SCORE</span>
+          <span>CLASE</span>
+          <span>SCORE TREND</span>
+          <span></span>
+        </div>
+
+        <div class="h-row" data-ticker="GGAL.BA" onclick="selectHolding(this, 'GGAL.BA')">
+          <span class="h-ticker">GGAL.BA <span class="tag-cedear">CEDEAR</span></span>
+          <span class="h-num">14.2%</span>
+          <span class="h-num delta-pos">+8.1%</span>
+          <span class="h-num">55.3</span>
+          <span><span class="h-signal-ind signal-accumulate"></span> ACCUMULATE</span>
+          <div class="h-bar-wrap"><div class="h-bar good" style="width: 55%;"></div></div>
+          <span class="h-action">Ver →</span>
+        </div>
+
+        <div class="h-row selected" data-ticker="TSLA" onclick="selectHolding(this, 'TSLA')">
+          <span class="h-ticker">TSLA</span>
+          <span class="h-num">11.8%</span>
+          <span class="h-num delta-neg">-12.4%</span>
+          <span class="h-num">32.4</span>
+          <span><span class="h-signal-ind signal-avoid"></span> AVOID</span>
+          <div class="h-bar-wrap"><div class="h-bar bad" style="width: 32%;"></div></div>
+          <span class="h-action">Ver →</span>
+        </div>
+
+        <div class="h-row" data-ticker="MSFT" onclick="selectHolding(this, 'MSFT')">
+          <span class="h-ticker">MSFT</span>
+          <span class="h-num">18.5%</span>
+          <span class="h-num delta-pos">+22.7%</span>
+          <span class="h-num">68.9</span>
+          <span><span class="h-signal-ind signal-accumulate"></span> ACCUMULATE</span>
+          <div class="h-bar-wrap"><div class="h-bar good" style="width: 69%;"></div></div>
+          <span class="h-action">Ver →</span>
+        </div>
+
+        <div class="h-row" data-ticker="AAPL" onclick="selectHolding(this, 'AAPL')">
+          <span class="h-ticker">AAPL</span>
+          <span class="h-num">15.0%</span>
+          <span class="h-num delta-pos">+6.3%</span>
+          <span class="h-num">69.2</span>
+          <span><span class="h-signal-ind signal-accumulate"></span> ACCUMULATE</span>
+          <div class="h-bar-wrap"><div class="h-bar good" style="width: 69%;"></div></div>
+          <span class="h-action">Ver →</span>
+        </div>
+
+        <div class="h-row" data-ticker="KO" onclick="selectHolding(this, 'KO')">
+          <span class="h-ticker">KO</span>
+          <span class="h-num">8.4%</span>
+          <span class="h-num delta-neg">-2.1%</span>
+          <span class="h-num">21.2</span>
+          <span><span class="h-signal-ind signal-anti-panic"></span> ANTI-PANIC</span>
+          <div class="h-bar-wrap"><div class="h-bar bad" style="width: 21%;"></div></div>
+          <span class="h-action">Ver →</span>
+        </div>
+
+        <div class="h-row" data-ticker="NVDA" onclick="selectHolding(this, 'NVDA')">
+          <span class="h-ticker">NVDA</span>
+          <span class="h-num">22.0%</span>
+          <span class="h-num delta-pos">+41.8%</span>
+          <span class="h-num">78.3</span>
+          <span><span class="h-signal-ind signal-strong-buy"></span> STRONG BUY</span>
+          <div class="h-bar-wrap"><div class="h-bar good" style="width: 78%;"></div></div>
+          <span class="h-action">Ver →</span>
+        </div>
+
+        <div class="h-row" data-ticker="YPFD.BA" onclick="selectHolding(this, 'YPFD.BA')">
+          <span class="h-ticker">YPFD.BA <span class="tag-cedear">CEDEAR</span></span>
+          <span class="h-num">10.1%</span>
+          <span class="h-num delta-pos">+15.6%</span>
+          <span class="h-num">48.9</span>
+          <span><span class="h-signal-ind signal-hold"></span> HOLD</span>
+          <div class="h-bar-wrap"><div class="h-bar mid" style="width: 49%;"></div></div>
+          <span class="h-action">Ver →</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- SIGNALS FEED -->
+    <div class="panel">
+      <div class="panel-head">
+        <div class="label">Señales activas · 24h</div>
+        <div class="badge badge-warn">3 ACCIONABLES</div>
+      </div>
+      <div class="signals-feed">
+
+        <div class="signal-card active">
+          <div class="signal-row1">
+            <span class="signal-clase clase-avoid">SUGERENCIA · VENTA</span>
+            <span class="signal-time">HACE 14 MIN</span>
+          </div>
+          <div class="signal-ticker">TSLA <span class="conviction">convicción <strong>78</strong>/100</span></div>
+          <div class="signal-reason">
+            "Score AVOID 32.4 + RSI 68 + precio 15% sobre SMA200. Murphy y Lynch coinciden: el descuento ya se evaporó. Es momento de tomar ganancias parciales."
+          </div>
+          <div class="signal-meta">
+            <span>Bloque dominante: <strong>Murphy 74</strong></span>
+            <span>Acción sugerida: <strong>−50% posición</strong></span>
+          </div>
+        </div>
+
+        <div class="signal-card">
+          <div class="signal-row1">
+            <span class="signal-clase clase-anti-panic">ANTI-PÁNICO</span>
+            <span class="signal-time">HACE 2 H</span>
+          </div>
+          <div class="signal-ticker">KO <span class="conviction">convicción <strong>71</strong>/100</span></div>
+          <div class="signal-reason">
+            "Score AVOID + RSI 28 (sobreventa extrema). Esto NO es señal de venta — es trampa de Kahneman. Si entró por dividendos, mantené hasta nuevo análisis fundamental."
+          </div>
+          <div class="signal-meta">
+            <span>Filtro Graham: <strong>parcial</strong></span>
+            <span>Recomendación: <strong>NO actuar</strong></span>
+          </div>
+        </div>
+
+        <div class="signal-card">
+          <div class="signal-row1">
+            <span class="signal-clase clase-strong-buy">SUGERENCIA · COMPRA</span>
+            <span class="signal-time">HACE 5 H</span>
+          </div>
+          <div class="signal-ticker">META <span class="conviction">convicción <strong>82</strong>/100</span></div>
+          <div class="signal-reason">
+            "STRONG BUY 81.4 + RSI 42 + precio rebotando contra SMA200. Setup técnico óptimo sobre fundamentales sólidos. Lynch lo clasifica como Stalwart en buen punto."
+          </div>
+          <div class="signal-meta">
+            <span>Bloque dominante: <strong>InvestingPro 88</strong></span>
+            <span>Acción sugerida: <strong>iniciar 8% cart.</strong></span>
+          </div>
+        </div>
+
+        <div class="signal-card">
+          <div class="signal-row1">
+            <span class="signal-clase clase-esperar">ESPERAR PULLBACK</span>
+            <span class="signal-time">HACE 8 H</span>
+          </div>
+          <div class="signal-ticker">NVDA <span class="conviction">convicción <strong>61</strong>/100</span></div>
+          <div class="signal-reason">
+            "Mantener posición existente, pero NO ampliar. RSI 71 + precio 28% sobre SMA200 sugieren agotamiento de corto plazo. Murphy advierte cautela en la entrada."
+          </div>
+          <div class="signal-meta">
+            <span>Tu PPC: <strong>$345</strong></span>
+            <span>Precio actual: <strong>$489</strong></span>
+          </div>
+        </div>
+
+        <div class="signal-card">
+          <div class="signal-row1">
+            <span class="signal-clase clase-accumulate">SUGERENCIA · ACUMULAR</span>
+            <span class="signal-time">AYER 16:00</span>
+          </div>
+          <div class="signal-ticker">GGAL.BA <span class="conviction">convicción <strong>68</strong>/100</span></div>
+          <div class="signal-reason">
+            "ACCUMULATE 55.3 + RSI 48 + CCL estable en $1,338. VRU sin trampa de devaluación. Lynch lo identifica como turnaround argentino con margen de seguridad razonable."
+          </div>
+          <div class="signal-meta">
+            <span>VRU: <strong style="color: var(--green);">SANO</strong></span>
+            <span>Acción sugerida: <strong>+5% posición</strong></span>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </div>
+
+  <!-- DETAIL PANEL · CAPSULE VIEW -->
+  <div class="detail-panel">
+
+    <!-- HEADER -->
+    <div class="detail-header">
+      <div class="detail-title-block">
+        <div class="eyebrow-detail">Capsule · TSLA · Sugerencia de Venta</div>
+        <div class="detail-title">El descuento que justificaba la posición ya se evaporó.</div>
+        <div class="detail-narrative">
+          La paciencia que te llevó a entrar en TSLA cuando todos vendían es la misma virtud que ahora te pide salir parcialmente. Vender por convicción no es lo mismo que vender por miedo — y el sistema te recuerda que tu tesis original ya cumplió su trabajo. Tomar ganancias no es traicionar la disciplina del long-term: es honrarla.
+          <span class="author">— NARRATIVA HOUSEL · BLOQUE MURPHY DOMINANTE</span>
+        </div>
+      </div>
+
+      <div class="position-card">
+        <div class="pcard-label">Tu posición actual</div>
+        <div class="position-row"><span class="key">Cantidad</span><span class="val">14 nominales</span></div>
+        <div class="position-row"><span class="key">PPC</span><span class="val">$398.20</span></div>
+        <div class="position-row"><span class="key">Precio actual</span><span class="val">$453.10</span></div>
+        <div class="position-row"><span class="key">P&amp;L abs.</span><span class="val green">+ $768.60</span></div>
+        <div class="position-row"><span class="key">P&amp;L %</span><span class="val green">+13.79%</span></div>
+        <div class="position-row"><span class="key">% cartera</span><span class="val">11.8%</span></div>
+        <div class="position-row"><span class="key">Días en posición</span><span class="val">218</span></div>
+      </div>
+    </div>
+
+    <!-- CHART -->
+    <div class="chart-container">
+      <div class="chart-meta">
+        <div class="legend">
+          <span><span class="legend-dot ld-price"></span>Precio</span>
+          <span><span class="legend-dot ld-sma50"></span>SMA 50</span>
+          <span><span class="legend-dot ld-sma200"></span>SMA 200</span>
+          <span><span class="legend-dot ld-rsi"></span>RSI (14)</span>
+        </div>
+        <div class="timeframe">
+          <button class="tf-btn">1M</button>
+          <button class="tf-btn">3M</button>
+          <button class="tf-btn active">6M</button>
+          <button class="tf-btn">1A</button>
+          <button class="tf-btn">5A</button>
+        </div>
+      </div>
+
+      <div id="price-chart"></div>
+      <div id="rsi-chart"></div>
+
+      <div class="chart-annotation">
+        <strong>Marcador ▼ del 12 abr:</strong> el sistema disparó la señal cuando el RSI cruzó 65 al alza con el precio 14% sobre SMA200. Hoy el RSI está en 68 y el precio se aleja del soporte de SMA50 (línea ámbar). Murphy diría que el momentum se está agotando.
+      </div>
+    </div>
+
+    <!-- BLOCKS -->
+    <div class="blocks-row">
+      <div class="block-cell">
+        <div class="blabel">Graham · Valor</div>
+        <div class="bscore">28</div>
+        <div class="bweight">peso <strong>45%</strong> · aporte <strong>12.6</strong></div>
+        <div class="bbar"><div class="bbar-fill bbar-graham" style="width: 28%;"></div></div>
+      </div>
+      <div class="block-cell">
+        <div class="blabel">InvestingPro · Salud</div>
+        <div class="bscore">52</div>
+        <div class="bweight">peso <strong>25%</strong> · aporte <strong>13.0</strong></div>
+        <div class="bbar"><div class="bbar-fill bbar-investingpro" style="width: 52%;"></div></div>
+      </div>
+      <div class="block-cell">
+        <div class="blabel">Lynch · Crecimiento</div>
+        <div class="bscore">35</div>
+        <div class="bweight">peso <strong>20%</strong> · aporte <strong>7.0</strong></div>
+        <div class="bbar"><div class="bbar-fill bbar-lynch" style="width: 35%;"></div></div>
+      </div>
+      <div class="block-cell">
+        <div class="blabel">Murphy · Técnico</div>
+        <div class="bscore" style="color: var(--amber);">74</div>
+        <div class="bweight">peso <strong>10%</strong> · aporte <strong>7.4</strong></div>
+        <div class="bbar"><div class="bbar-fill bbar-murphy" style="width: 74%;"></div></div>
+      </div>
+    </div>
+
+    <!-- DECISION CAPSULE (cooling step) -->
+    <div class="capsule">
+      <div class="clabel">Cooling step · Antes de actuar, escribí tu tesis</div>
+      <textarea placeholder="Por qué estás considerando vender. Una línea es suficiente. Si dentro de 30 días releés esto y no entendés tu razonamiento, el sistema te avisa."></textarea>
+
+      <div class="capsule-actions">
+        <button class="btn btn-primary">Marcar como ejecutado en mi broker</button>
+        <button class="btn btn-warn">Posponer 7 días</button>
+        <button class="btn btn-ghost">Ignorar señal</button>
+      </div>
+
+      <div class="capsule-note">
+        <strong>Recordatorio Advisory:</strong> Horizontes no ejecuta órdenes. Tu broker (IOL, PPI, Bull Market, IBKR) sigue siendo el único punto de ejecución. Esta cápsula se guardará en tu <em>investment_journal</em> con timestamp y se vinculará al follow-up automático a 30 días.
+      </div>
+    </div>
+  </div>
+
+  <!-- IMPORT BAR -->
+  <div class="import-bar">
+    <div>
+      <div class="ibhead">Mantenimiento · 7 posiciones cargadas</div>
+      <div class="ibtitle">Actualizá tu cartera <em>cuando quieras</em></div>
+    </div>
+    <div class="import-options">
+      <div class="iopt">
+        <span class="iopt-icon">⌨</span>
+        <span class="iopt-label">CARGA MANUAL</span>
+        <span class="iopt-meta">+ AUTOCOMPLETE · MVP</span>
+      </div>
+      <div class="iopt">
+        <span class="iopt-icon">📄</span>
+        <span class="iopt-label">CSV BROKER</span>
+        <span class="iopt-meta">IOL · PPI · BULL · COCOS</span>
+      </div>
+      <div class="iopt">
+        <span class="iopt-icon">🔗</span>
+        <span class="iopt-label">API BROKER</span>
+        <span class="iopt-meta">v2 · OAUTH · ROADMAP</span>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+  // ───── Live clock ─────
+  const clockEl = document.getElementById('clock');
+  function tick() {
+    const d = new Date();
+    const t = d.toTimeString().slice(0, 8);
+    clockEl.textContent = `${t} UTC-3`;
+  }
+  setInterval(tick, 1000); tick();
+
+  // ───── Holding selection ─────
+  function selectHolding(row, ticker) {
+    document.querySelectorAll('.h-row').forEach(r => r.classList.remove('selected'));
+    row.classList.add('selected');
+  }
+
+  // ───── Lightweight Charts setup ─────
+  // Generate realistic-looking TSLA-style data: 6 months of daily candles + indicators
+  function genData() {
+    const out = [];
+    let price = 245;
+    const start = new Date('2025-10-25');
+    for (let i = 0; i < 130; i++) {
+      const d = new Date(start);
+      d.setDate(d.getDate() + i);
+      // Skip weekends
+      if (d.getDay() === 0 || d.getDay() === 6) continue;
+
+      // Price walk: dip then recovery + late run-up = bullish exhaustion
+      let drift;
+      if (i < 30) drift = -1.4;          // initial dip
+      else if (i < 70) drift = 0.2;      // sideways
+      else if (i < 110) drift = 1.8;     // run-up
+      else drift = 2.4;                  // exhaustion phase
+      price += drift + (Math.random() - 0.5) * 8;
+      price = Math.max(180, price);
+
+      const open = price + (Math.random() - 0.5) * 3;
+      const close = price;
+      const high = Math.max(open, close) + Math.random() * 4;
+      const low = Math.min(open, close) - Math.random() * 4;
+      out.push({
+        time: d.toISOString().split('T')[0],
+        open: +open.toFixed(2),
+        high: +high.toFixed(2),
+        low: +low.toFixed(2),
+        close: +close.toFixed(2),
+      });
+    }
+    return out;
+  }
+
+  function sma(data, period) {
+    const out = [];
+    for (let i = period - 1; i < data.length; i++) {
+      const slice = data.slice(i - period + 1, i + 1);
+      const avg = slice.reduce((s, c) => s + c.close, 0) / period;
+      out.push({ time: data[i].time, value: +avg.toFixed(2) });
+    }
+    return out;
+  }
+
+  function rsi(data, period = 14) {
+    const out = [];
+    let gains = 0, losses = 0;
+    for (let i = 1; i < data.length; i++) {
+      const change = data[i].close - data[i - 1].close;
+      const gain = Math.max(change, 0);
+      const loss = Math.max(-change, 0);
+      if (i <= period) {
+        gains += gain; losses += loss;
+        if (i === period) {
+          const avgG = gains / period, avgL = losses / period;
+          const rs = avgL === 0 ? 100 : avgG / avgL;
+          out.push({ time: data[i].time, value: +(100 - 100 / (1 + rs)).toFixed(2) });
+        }
+      } else {
+        const prevG = (out[out.length - 1] || {}).avgG || gains / period;
+        const prevL = (out[out.length - 1] || {}).avgL || losses / period;
+        const avgG = (prevG * (period - 1) + gain) / period;
+        const avgL = (prevL * (period - 1) + loss) / period;
+        const rs = avgL === 0 ? 100 : avgG / avgL;
+        out.push({
+          time: data[i].time,
+          value: +(100 - 100 / (1 + rs)).toFixed(2),
+          avgG, avgL,
+        });
+      }
+    }
+    return out.map(p => ({ time: p.time, value: p.value }));
+  }
+
+  const candles = genData();
+  const sma50Data = sma(candles, 50);
+  const sma200Data = sma(candles, Math.min(80, candles.length - 1)); // use 80 since we have ~130
+  const rsiData = rsi(candles, 14);
+
+  // ── Price chart
+  const priceChart = LightweightCharts.createChart(document.getElementById('price-chart'), {
+    layout: {
+      background: { color: 'transparent' },
+      textColor: '#6b7787',
+      fontFamily: 'Space Mono, monospace',
+      fontSize: 10,
+    },
+    grid: {
+      vertLines: { color: 'rgba(255,255,255,0.03)' },
+      horzLines: { color: 'rgba(255,255,255,0.04)' },
+    },
+    rightPriceScale: { borderColor: 'rgba(255,255,255,0.08)' },
+    timeScale: { borderColor: 'rgba(255,255,255,0.08)', timeVisible: false },
+    crosshair: {
+      mode: LightweightCharts.CrosshairMode.Normal,
+      vertLine: { color: 'rgba(34,211,238,0.4)', width: 1, style: 2 },
+      horzLine: { color: 'rgba(34,211,238,0.4)', width: 1, style: 2 },
+    },
+    width: document.getElementById('price-chart').clientWidth,
+    height: 280,
+  });
+
+  const candleSeries = priceChart.addCandlestickSeries({
+    upColor: '#22d3ee',
+    downColor: '#f87171',
+    borderUpColor: '#22d3ee',
+    borderDownColor: '#f87171',
+    wickUpColor: 'rgba(34,211,238,0.6)',
+    wickDownColor: 'rgba(248,113,113,0.6)',
+  });
+  candleSeries.setData(candles);
+
+  const sma50Series = priceChart.addLineSeries({
+    color: '#fbbf24',
+    lineWidth: 1.5,
+    priceLineVisible: false,
+    lastValueVisible: false,
+  });
+  sma50Series.setData(sma50Data);
+
+  const sma200Series = priceChart.addLineSeries({
+    color: '#a78bfa',
+    lineWidth: 1.5,
+    priceLineVisible: false,
+    lastValueVisible: false,
+  });
+  sma200Series.setData(sma200Data);
+
+  // Signal marker on the day the alert was triggered (~12 days before today)
+  const signalIdx = candles.length - 12;
+  const signalDay = candles[signalIdx];
+  candleSeries.setMarkers([
+    {
+      time: signalDay.time,
+      position: 'aboveBar',
+      color: '#f87171',
+      shape: 'arrowDown',
+      text: 'SEÑAL VENTA',
+    },
+  ]);
+
+  // ── RSI chart (separate pane)
+  const rsiChart = LightweightCharts.createChart(document.getElementById('rsi-chart'), {
+    layout: {
+      background: { color: 'transparent' },
+      textColor: '#6b7787',
+      fontFamily: 'Space Mono, monospace',
+      fontSize: 10,
+    },
+    grid: {
+      vertLines: { color: 'rgba(255,255,255,0.03)' },
+      horzLines: { color: 'rgba(255,255,255,0.04)' },
+    },
+    rightPriceScale: {
+      borderColor: 'rgba(255,255,255,0.08)',
+      autoScale: false,
+      mode: 0,
+    },
+    timeScale: { borderColor: 'rgba(255,255,255,0.08)', timeVisible: false, visible: false },
+    width: document.getElementById('rsi-chart').clientWidth,
+    height: 100,
+  });
+
+  const rsiSeries = rsiChart.addLineSeries({
+    color: '#4ade80',
+    lineWidth: 1.5,
+    priceLineVisible: false,
+    lastValueVisible: true,
+  });
+  rsiSeries.setData(rsiData);
+
+  // RSI horizontal lines
+  rsiSeries.createPriceLine({
+    price: 70, color: '#f87171', lineWidth: 1, lineStyle: 2,
+    axisLabelVisible: true, title: 'OB',
+  });
+  rsiSeries.createPriceLine({
+    price: 30, color: '#4ade80', lineWidth: 1, lineStyle: 2,
+    axisLabelVisible: true, title: 'OS',
+  });
+  rsiSeries.createPriceLine({
+    price: 50, color: 'rgba(255,255,255,0.1)', lineWidth: 1, lineStyle: 1,
+    axisLabelVisible: false,
+  });
+
+  // Sync timescales
+  priceChart.timeScale().subscribeVisibleLogicalRangeChange(range => {
+    if (range) rsiChart.timeScale().setVisibleLogicalRange(range);
+  });
+  rsiChart.timeScale().subscribeVisibleLogicalRangeChange(range => {
+    if (range) priceChart.timeScale().setVisibleLogicalRange(range);
+  });
+
+  priceChart.timeScale().fitContent();
+  rsiChart.timeScale().fitContent();
+
+  // ── Resize handler
+  window.addEventListener('resize', () => {
+    priceChart.applyOptions({ width: document.getElementById('price-chart').clientWidth });
+    rsiChart.applyOptions({ width: document.getElementById('rsi-chart').clientWidth });
+  });
+</script>
+</body>
+</html>

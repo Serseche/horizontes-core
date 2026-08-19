@@ -1,0 +1,486 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Horizontes — Dashboard</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Outfit:wght@300;400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:#0a0a08;color:#e8e5e0;font-family:'Outfit',sans-serif;min-height:100vh}
+  .mono{font-family:'DM Mono',monospace;font-variant-numeric:tabular-nums}
+  input,button{font-family:'Outfit',sans-serif;outline:none}
+  button{cursor:pointer}
+  ::-webkit-scrollbar{width:3px}
+  ::-webkit-scrollbar-thumb{background:#222;border-radius:2px}
+  @keyframes horizontesPulse{
+    0%,100%{box-shadow:0 0 0 0 rgba(74,222,128,0.7);transform:scale(1)}
+    50%    {box-shadow:0 0 0 4px rgba(74,222,128,0);transform:scale(1.15)}
+  }
+  @keyframes horizontesToastIn{
+    from{opacity:0;transform:translateX(20px)}
+    to  {opacity:1;transform:translateX(0)}
+  }
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script>
+// ─── Configuración de Supabase ────────────────────────────────────────────────
+// OPCIÓN 1: Completá acá las credenciales y no tenés que tipearlas cada vez
+// OPCIÓN 2: Dejalo vacío y usá el botón ⚙ del dashboard
+const SUPABASE_URL_DEFAULT = "";   // ej: "https://hfrliueqvwnqmdehonvr.supabase.co"
+const SUPABASE_KEY_DEFAULT = "";   // anon key desde Settings → API (empieza con eyJhbGci...)
+
+// ─── React ────────────────────────────────────────────────────────────────────
+const {useState,useCallback,useEffect,useRef,createElement:h} = React;
+
+// ─── Supabase JS client (cargado vía CDN como window.supabase) ────────────────
+const SupabaseClient = window.supabase;
+
+// ─── Constantes ───────────────────────────────────────────────────────────────
+const PERFILES = [
+  {key:"liquidez_plus",label:"Liquidez+",desc:"< 1 año"},
+  {key:"conservador",  label:"Conservador",desc:"1–2 años"},
+  {key:"moderado",     label:"Moderado",desc:"3–7 años"},
+  {key:"agresivo",     label:"Agresivo",desc:"10+ años"},
+];
+
+const BLOQUE_META = {
+  graham:       {label:"Graham",      icon:"G", desc:"Valor intrínseco & seguridad", color:"#60a5fa"},
+  murphy:       {label:"Murphy",      icon:"M", desc:"RSI · SMA · Volumen relativo", color:"#22d3ee"},
+  lynch:        {label:"Lynch",       icon:"L", desc:"PEG · Crecimiento BPA · ROC",  color:"#4ade80"},
+  investingpro: {label:"InvestingPro",icon:"IP",desc:"Health Score · ROIC · Upside", color:"#a78bfa"},
+};
+
+const scoreColor  = s => s>=75?"#4ade80":s>=55?"#60a5fa":s>=35?"#fbbf24":"#f87171";
+const scoreBg     = s => s>=75?"rgba(74,222,128,0.12)":s>=55?"rgba(96,165,250,0.12)":s>=35?"rgba(251,191,36,0.12)":"rgba(248,113,113,0.12)";
+const scoreBorder = s => s>=75?"rgba(74,222,128,0.35)":s>=55?"rgba(96,165,250,0.35)":s>=35?"rgba(251,191,36,0.35)":"rgba(248,113,113,0.35)";
+
+const SEM = {
+  VERDE:    {dot:"#4ade80",bg:"rgba(74,222,128,0.07)"},
+  AMARILLO: {dot:"#fbbf24",bg:"rgba(251,191,36,0.07)"},
+  ROJO:     {dot:"#f87171",bg:"rgba(248,113,113,0.07)"},
+};
+
+// ─── Demo data (NVDA — test de integración real) ──────────────────────────────
+const DEMO_SCORES = {
+  moderado:{
+    ticker:"NVDA",perfil_inversor:"moderado",
+    score_final:78.32,clasificacion:"STRONG BUY",
+    graham_score_bruto:71,graham_peso:0.45,graham_aporte:31.95,
+    murphy_score_bruto:74,murphy_peso:0.10,murphy_aporte:7.40,
+    lynch_score_bruto:88,lynch_peso:0.20,lynch_aporte:17.60,
+    investingpro_score_bruto:85,investingpro_peso:0.25,investingpro_aporte:21.25,
+    es_cedear:false,vru_alerta_trampa:false,vru_valor_usd:null,
+    narrativa_titulo:"Activo de Alta Convicción",
+    narrativa_mensaje:"Este activo paga la 'tarifa de admisión' correcta para tu horizonte. La volatilidad no es una multa — es el precio de entrada a retornos superiores. El tiempo es tu mayor ventaja competitiva.",
+    alertas:["⚠️ RSI 71.65 — zona de sobrecompra. Murphy recomienda cautela en la entrada."],
+    calculado_at:new Date().toISOString(),
+    expira_at:new Date(Date.now()+24*3600*1000).toISOString(),
+  }
+};
+
+const DEMO_SEM = [
+  {indicador:"Tasa Fed Funds",   region:"US",estado:"AMARILLO",valor_actual:5.25,unidad:"%",      notas:"Ciclo Dalio: Desaceleración"},
+  {indicador:"Inflación CPI YoY",region:"US",estado:"AMARILLO",valor_actual:3.20,unidad:"%",      notas:"Por encima del target 2%"},
+  {indicador:"Riesgo País EMBI", region:"AR",estado:"ROJO",    valor_actual:1650,unidad:"bps",    notas:"Penalización CEDEARs −10%"},
+  {indicador:"CCL",              region:"AR",estado:"AMARILLO",valor_actual:1400,unidad:"ARS/USD",notas:"Fuente: Bluelytics live"},
+  {indicador:"S&P 500 / SMA200", region:"US",estado:"VERDE",   valor_actual:1.11,unidad:"ratio",  notas:"Tendencia alcista confirmada"},
+];
+
+// ─── Gauge SVG ────────────────────────────────────────────────────────────────
+function GaugeArc({score}){
+  const r=52,cx=70,cy=70,sw=11;
+  const rad=a=>a*Math.PI/180;
+  const pt=(a,rr)=>({x:cx+rr*Math.cos(rad(180-a)),y:cy-rr*Math.sin(rad(180-a))});
+  const angle=Math.min((score/100)*180,179.9);
+  const p0=pt(0,r),p1=pt(180,r),pA=pt(angle,r);
+  const c=scoreColor(score);
+  return h("svg",{width:140,height:82,viewBox:"0 0 140 82",style:{overflow:"visible"}},
+    h("path",{d:`M ${p0.x} ${p0.y} A ${r} ${r} 0 0 1 ${p1.x} ${p1.y}`,fill:"none",stroke:"rgba(255,255,255,0.05)",strokeWidth:sw,strokeLinecap:"round"}),
+    h("path",{d:`M ${p0.x} ${p0.y} A ${r} ${r} 0 ${angle>180?1:0} 1 ${pA.x} ${pA.y}`,fill:"none",stroke:c,strokeWidth:sw,strokeLinecap:"round",style:{filter:`drop-shadow(0 0 8px ${c}99)`,transition:"all .6s ease"}}),
+    h("circle",{cx:pA.x,cy:pA.y,r:5,fill:c,style:{filter:`drop-shadow(0 0 5px ${c})`,transition:"all .6s ease"}})
+  );
+}
+
+// ─── Supabase fetch ───────────────────────────────────────────────────────────
+async function sbFetch(url,key,table,qs=""){
+  const res=await fetch(`${url}/rest/v1/${table}?${qs}`,{
+    headers:{apikey:key,Authorization:`Bearer ${key}`}
+  });
+  if(!res.ok){const t=await res.text();throw new Error(`${res.status}: ${t}`);}
+  return res.json();
+}
+
+// ─── Config Modal ─────────────────────────────────────────────────────────────
+function ConfigModal({current,onSave,onClose}){
+  const [url,setUrl]=useState(current.url||"");
+  const [key,setKey]=useState(current.key||"");
+  const inp=s=>({width:"100%",background:"#0a0a08",border:"0.5px solid rgba(255,255,255,0.1)",borderRadius:8,padding:"9px 12px",fontSize:11,color:"#e8e5e0",fontFamily:"DM Mono,monospace",outline:"none",marginTop:5});
+  return h("div",{style:{position:"fixed",inset:0,background:"rgba(0,0,0,0.88)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:200,padding:16}},
+    h("div",{style:{background:"#111110",border:"0.5px solid rgba(255,255,255,0.12)",borderRadius:14,padding:24,width:"100%",maxWidth:420}},
+      h("div",{style:{fontSize:14,fontWeight:600,marginBottom:2}},"Conectar Supabase"),
+      h("div",{style:{fontSize:11,color:"#555550",marginBottom:18}},"Usá la ",h("span",{style:{color:"#a78bfa"}},"anon key")," desde Settings → API en Supabase (empieza con eyJhbGci...)"),
+      h("div",{style:{marginBottom:12}},
+        h("div",{style:{fontSize:10,fontWeight:500,color:"#555550",letterSpacing:".06em"}},"SUPABASE_URL"),
+        h("input",{value:url,onChange:e=>setUrl(e.target.value),placeholder:"https://xxxx.supabase.co",style:inp()})
+      ),
+      h("div",{style:{marginBottom:16}},
+        h("div",{style:{fontSize:10,fontWeight:500,color:"#555550",letterSpacing:".06em"}},"ANON KEY (empieza con eyJhbGci...)"),
+        h("input",{value:key,onChange:e=>setKey(e.target.value),placeholder:"eyJhbGci...",style:inp()})
+      ),
+      h("div",{style:{background:"rgba(96,165,250,0.07)",border:"0.5px solid rgba(96,165,250,0.2)",borderRadius:8,padding:"10px 12px",marginBottom:16,fontSize:10,color:"#60a5fa",lineHeight:1.7}},
+        "Dónde encontrar la anon key: Supabase Dashboard → Settings → API → ",h("strong",null,"Project API keys → anon / public")
+      ),
+      h("div",{style:{display:"flex",gap:8}},
+        h("button",{onClick:onClose,style:{flex:1,background:"rgba(255,255,255,0.05)",color:"#888580",borderRadius:8,padding:"9px",fontSize:12,border:"0.5px solid rgba(255,255,255,0.08)"}},"Cancelar"),
+        h("button",{onClick:()=>onSave({url:url.trim(),key:key.trim()}),style:{flex:2,background:"#4ade80",color:"#0a0a08",borderRadius:8,padding:"9px",fontSize:12,fontWeight:600,border:"none"}},"Conectar y analizar →")
+      )
+    )
+  );
+}
+
+// ─── App Principal ────────────────────────────────────────────────────────────
+function App(){
+  const [config,setConfig]       = useState({url:SUPABASE_URL_DEFAULT,key:SUPABASE_KEY_DEFAULT});
+  const [showCfg,setShowCfg]     = useState(false);
+  const [inputTk,setInputTk]     = useState("NVDA");
+  const [perfil,setPerfil]       = useState("moderado");
+  const [scores,setScores]       = useState(DEMO_SCORES);
+  const [semaforo,setSemaforo]   = useState(DEMO_SEM);
+  const [loading,setLoading]     = useState(false);
+  const [error,setError]         = useState(null);
+  const [isDemo,setIsDemo]       = useState(true);
+  const [activeTk,setActiveTk]   = useState("NVDA");
+
+  const current = scores[perfil] || null;
+  const [top10,setTop10] = useState([]);
+  const [loadingTop,setLoadingTop] = useState(false);
+
+  // ─── Realtime: estado y refs (la suscripción se monta después de fetchAll) ──
+  // Estado de conexión WebSocket: 'idle' | 'connecting' | 'live' | 'error'
+  const [rtStatus,setRtStatus] = useState("idle");
+  // Toasts de señales que entran en vivo (FIFO, máx 4 visibles)
+  const [toasts,setToasts] = useState([]);
+  // Cliente Supabase persistente entre renders (evita reconexión al re-render)
+  const sbClientRef = useRef(null);
+  // Ref al ticker activo: el callback Realtime lee el valor más reciente sin
+  // recrear la suscripción cuando cambia el ticker (eso dropearía eventos)
+  const activeTkRef = useRef(activeTk);
+  useEffect(()=>{activeTkRef.current=activeTk;},[activeTk]);
+
+  const fetchTop10 = useCallback(async(p,cfg)=>{
+    if(!cfg.url||!cfg.key) return;
+    setLoadingTop(true);
+    try{
+      const rows = await sbFetch(cfg.url,cfg.key,"scoring_cache",
+        `perfil_inversor=eq.${p}&select=ticker,score_final,clasificacion,es_cedear&order=score_final.desc&limit=10`);
+      setTop10(rows);
+    }catch(e){setTop10([]);}
+    finally{setLoadingTop(false);}
+  },[]);
+
+  const fetchAll = useCallback(async(ticker,cfg)=>{
+    if(!cfg.url||!cfg.key){setShowCfg(true);return;}
+    setLoading(true);setError(null);
+    try{
+      const rows = await sbFetch(cfg.url,cfg.key,"scoring_cache",`ticker=eq.${ticker.toUpperCase()}&select=*`);
+      const byP  = rows.reduce((a,r)=>({...a,[r.perfil_inversor]:r}),{});
+      if(Object.keys(byP).length===0){
+        setError(`No hay análisis cacheado para ${ticker.toUpperCase()}. Ejecutá el pipeline Python primero.`);
+        setLoading(false);return;
+      }
+      setScores(byP);setActiveTk(ticker.toUpperCase());setIsDemo(false);
+      fetchTop10(perfil,cfg);
+      const sem = await sbFetch(cfg.url,cfg.key,"macro_semaforo","select=*&order=fecha_dato.desc&limit=10");
+      if(sem.length) setSemaforo(sem);
+    }catch(e){setError(e.message);}
+    finally{setLoading(false);}
+  },[]);
+
+  // ─── Realtime: suscripción a signal_events (montada DESPUÉS de fetchAll) ────
+  useEffect(()=>{
+    // Sin credenciales o SDK no cargado → no conectar
+    if(!config.url || !config.key || !SupabaseClient){
+      setRtStatus("idle");
+      return;
+    }
+    setRtStatus("connecting");
+
+    const client = SupabaseClient.createClient(config.url, config.key, {
+      realtime: {params: {eventsPerSecond: 5}},
+    });
+    sbClientRef.current = client;
+
+    const channel = client
+      .channel("horizontes-signal-events")
+      .on(
+        "postgres_changes",
+        {event: "INSERT", schema: "public", table: "signal_events"},
+        payload => {
+          const ev = payload.new || {};
+          // Push toast (mantenemos los últimos 4)
+          setToasts(prev => [
+            ...prev.slice(-3),
+            {
+              id: `${ev.id||Date.now()}-${Math.random().toString(36).slice(2,7)}`,
+              ticker: ev.ticker || "?",
+              signal_type: ev.signal_type || "—",
+              conviction: ev.conviction ?? null,
+              ts: Date.now(),
+            }
+          ]);
+          // Si la señal afecta al ticker activo, refrescar la card
+          if(ev.ticker && activeTkRef.current
+             && ev.ticker.toUpperCase()===activeTkRef.current.toUpperCase()){
+            fetchAll(ev.ticker, config);
+          }
+        }
+      )
+      .subscribe(status => {
+        if(status==="SUBSCRIBED")         setRtStatus("live");
+        else if(status==="CHANNEL_ERROR") setRtStatus("error");
+        else if(status==="TIMED_OUT")     setRtStatus("error");
+        else if(status==="CLOSED")        setRtStatus("idle");
+      });
+
+    return ()=>{
+      try{ client.removeChannel(channel); }catch(_){}
+      sbClientRef.current = null;
+      setRtStatus("idle");
+    };
+  // Re-suscribir solo al cambiar credenciales — activeTk se lee vía ref
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  },[config.url, config.key]);
+
+  // Auto-dismiss del toast más viejo cada 6 segundos
+  useEffect(()=>{
+    if(toasts.length===0) return;
+    const t = setTimeout(()=>setToasts(prev=>prev.slice(1)), 6000);
+    return ()=>clearTimeout(t);
+  },[toasts]);
+
+  const onSearch  = ()=>fetchAll(inputTk,config);
+  const onCfgSave = cfg=>{setConfig(cfg);setShowCfg(false);fetchAll(inputTk,cfg);};
+  const onPerfilChange = p=>{setPerfil(p);if(!isDemo) fetchTop10(p,config);};
+
+  const C = {
+    card:{background:"#111110",border:"0.5px solid rgba(255,255,255,0.07)",borderRadius:13,padding:"20px 20px 18px"},
+    label:{fontSize:10,fontWeight:500,textTransform:"uppercase",letterSpacing:".08em",color:"#444440",marginBottom:14},
+  };
+
+  return h("div",{style:{maxWidth:840,margin:"0 auto",padding:"22px 16px 56px"}},
+
+    // Header
+    h("header",{style:{display:"flex",alignItems:"center",gap:12,marginBottom:20}},
+      h("div",{style:{width:38,height:38,borderRadius:11,background:"linear-gradient(135deg,#4ade80,#22d3ee)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:17,fontWeight:700,color:"#0a0a08",flexShrink:0}},"H"),
+      h("div",{style:{flex:1}},
+        h("div",{style:{fontSize:15,fontWeight:600,letterSpacing:"-0.01em"}},"Horizontes"),
+        h("div",{style:{fontSize:11,color:"#444440",display:"flex",alignItems:"center",gap:5}},
+          // Punto de estado: animado cuando hay Realtime live
+          h("span",{style:{
+            width:5,height:5,borderRadius:"50%",display:"inline-block",
+            background: rtStatus==="live"?"#4ade80"
+                       :rtStatus==="connecting"?"#fbbf24"
+                       :rtStatus==="error"?"#f87171"
+                       :config.url?"#60a5fa":"#f87171",
+            animation: rtStatus==="live"?"horizontesPulse 2s ease-in-out infinite":"none",
+          }}),
+          isDemo
+            ? `Demo · NVDA · datos del test de integración`
+            : rtStatus==="live"     ? `Live · Realtime · ${activeTk}`
+            : rtStatus==="connecting"? `Conectando WebSocket…`
+            : rtStatus==="error"     ? `Realtime: error · usando REST`
+            :                          `Live · Supabase · ${activeTk}`
+        )
+      ),
+      h("div",{style:{display:"flex",gap:6,alignItems:"center"}},
+        h("div",{style:{display:"flex",background:"#111110",border:"0.5px solid rgba(255,255,255,0.09)",borderRadius:9,overflow:"hidden",alignItems:"center"}},
+          h("input",{value:inputTk,onChange:e=>setInputTk(e.target.value.toUpperCase()),onKeyDown:e=>e.key==="Enter"&&onSearch(),placeholder:"TICKER",style:{background:"none",border:"none",padding:"8px 10px",fontSize:13,fontWeight:500,color:"#e8e5e0",width:88,letterSpacing:".06em",fontFamily:"DM Mono,monospace"}}),
+          h("button",{onClick:onSearch,style:{background:"#4ade80",color:"#0a0a08",padding:"8px 13px",fontSize:13,fontWeight:600,border:"none",letterSpacing:".02em"}},loading?"···":"→")
+        ),
+        h("button",{onClick:()=>setShowCfg(true),title:"Configurar Supabase",style:{background:"#111110",border:"0.5px solid rgba(255,255,255,0.09)",borderRadius:9,width:36,height:36,display:"flex",alignItems:"center",justifyContent:"center",fontSize:15,color:config.url?"#4ade80":"#666"}},"⚙")
+      )
+    ),
+
+    // Error
+    error&&h("div",{style:{background:"rgba(248,113,113,0.08)",border:"0.5px solid rgba(248,113,113,0.3)",borderRadius:9,padding:"10px 14px",marginBottom:14,fontSize:11,color:"#f87171",lineHeight:1.5}},`⚠ ${error}`),
+
+    // Demo notice
+    isDemo&&h("div",{style:{background:"rgba(251,191,36,0.06)",border:"0.5px solid rgba(251,191,36,0.18)",borderRadius:9,padding:"9px 14px",marginBottom:14,fontSize:11,color:"#fbbf24",display:"flex",alignItems:"center",justifyContent:"space-between",gap:10}},
+      h("span",null,"Modo demo — conectá Supabase para ver datos live de tu caché"),
+      h("button",{onClick:()=>setShowCfg(true),style:{background:"rgba(251,191,36,0.12)",color:"#fbbf24",border:"0.5px solid rgba(251,191,36,0.25)",borderRadius:5,padding:"3px 10px",fontSize:10,fontWeight:600,whiteSpace:"nowrap"}},"Conectar →")
+    ),
+
+    // Score + Bloques
+    h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:12}},
+
+      // Score card
+      h("div",{style:C.card},
+        h("div",{style:C.label},"Score de Convicción"),
+        current?h("div",null,
+          h("div",{style:{display:"flex",flexDirection:"column",alignItems:"center"}},
+            h(GaugeArc,{score:current.score_final??0}),
+            h("div",{className:"mono",style:{fontSize:44,fontWeight:500,color:scoreColor(current.score_final),lineHeight:1,marginTop:2,letterSpacing:"-0.02em"}},current.score_final?.toFixed(1)),
+            h("div",{style:{fontSize:10,color:"#444440",marginBottom:8}},"/100 pts"),
+            h("span",{style:{padding:"4px 14px",borderRadius:20,fontSize:11,fontWeight:600,letterSpacing:".04em",background:scoreBg(current.score_final),color:scoreColor(current.score_final),border:`0.5px solid ${scoreBorder(current.score_final)}`}},current.clasificacion)
+          ),
+          current.narrativa_titulo&&h("div",{style:{marginTop:16,borderTop:"0.5px solid rgba(255,255,255,0.06)",paddingTop:14}},
+            h("div",{style:{fontSize:11,fontWeight:600,color:scoreColor(current.score_final),marginBottom:6}},current.narrativa_titulo),
+            h("div",{style:{fontSize:11,color:"#888580",lineHeight:1.65}},current.narrativa_mensaje)
+          ),
+          current.alertas?.length>0&&h("div",{style:{marginTop:10}},
+            ...current.alertas.map((a,i)=>h("div",{key:i,style:{fontSize:10,color:"#fbbf24",background:"rgba(251,191,36,0.07)",border:"0.5px solid rgba(251,191,36,0.18)",borderRadius:7,padding:"6px 10px",marginTop:5,lineHeight:1.5}},a))
+          ),
+          current.es_cedear&&h("div",{style:{marginTop:12,background:"rgba(167,139,250,0.08)",border:"0.5px solid rgba(167,139,250,0.2)",borderRadius:9,padding:"10px 12px"}},
+            h("div",{style:{fontSize:10,fontWeight:600,color:"#a78bfa",marginBottom:5}},"CEDEAR · Módulo VRU"),
+            h("div",{className:"mono",style:{fontSize:12,color:"#e8e5e0"}},"$",current.vru_valor_usd?.toFixed(2)," USD"),
+            current.vru_alerta_trampa&&h("div",{style:{fontSize:10,color:"#f87171",marginTop:4}},"⚠ ALERTA TRAMPA DE DEVALUACIÓN")
+          )
+        ):h("div",{style:{color:"#444440",fontSize:12,textAlign:"center",padding:"30px 0"}},loading?"Consultando caché…":"Sin análisis para este perfil")
+      ),
+
+      // Bloques card
+      h("div",{style:C.card},
+        h("div",{style:C.label},"Ficha de Salud · Bloques"),
+        current?h("div",null,
+          ...Object.entries(BLOQUE_META).map(([key,meta])=>{
+            const s   = current[`${key}_score_bruto`]??0;
+            const peso= current[`${key}_peso`]??0;
+            const apt = current[`${key}_aporte`]??0;
+            const off = peso===0;
+            return h("div",{key,style:{marginBottom:13,opacity:off?0.3:1}},
+              h("div",{style:{display:"flex",alignItems:"center",gap:8,marginBottom:5}},
+                h("div",{style:{width:26,height:26,borderRadius:7,background:meta.color+"16",border:`0.5px solid ${meta.color}44`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:9,fontWeight:600,color:meta.color,flexShrink:0}},meta.icon),
+                h("div",{style:{flex:1,minWidth:0}},
+                  h("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"center"}},
+                    h("span",{style:{fontSize:12,fontWeight:500}},meta.label),
+                    h("span",{className:"mono",style:{fontSize:13,fontWeight:500,color:off?"#333":meta.color}},off?"—":s.toFixed(0))
+                  ),
+                  h("div",{style:{fontSize:9,color:"#444440"}},off?"inactivo en este perfil":`${(peso*100).toFixed(0)}% peso · +${apt.toFixed(1)} pts`)
+                )
+              ),
+              !off&&h("div",{style:{height:3,background:"rgba(255,255,255,0.05)",borderRadius:2,overflow:"hidden"}},
+                h("div",{style:{height:"100%",width:`${Math.min(s,100)}%`,background:meta.color,borderRadius:2,transition:"width .55s ease",boxShadow:`0 0 4px ${meta.color}88`}})
+              )
+            );
+          }),
+          h("div",{style:{borderTop:"0.5px solid rgba(255,255,255,0.06)",paddingTop:12,marginTop:6,display:"flex",justifyContent:"space-between",alignItems:"center"}},
+            h("span",{style:{fontSize:10,color:"#444440"}},"Score ponderado final"),
+            h("span",{className:"mono",style:{fontSize:20,fontWeight:500,color:scoreColor(current.score_final)}},current.score_final?.toFixed(2))
+          )
+        ):h("div",{style:{color:"#444440",fontSize:12,textAlign:"center",padding:"30px 0"}},"—")
+      )
+    ),
+
+    // Comparador perfiles
+    h("div",{style:{...C.card,marginBottom:12}},
+      h("div",{style:C.label},"Comparador de Horizontes"),
+      h("div",{style:{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:8}},
+        ...PERFILES.map(p=>{
+          const s=scores[p.key];
+          const active=p.key===perfil;
+          const c=s?scoreColor(s.score_final):"#333";
+          return h("button",{key:p.key,onClick:()=>s&&onPerfilChange(p.key),style:{background:active?c+"14":"rgba(255,255,255,0.02)",border:`0.5px solid ${active?c:"rgba(255,255,255,0.07)"}`,borderRadius:10,padding:"12px 8px",textAlign:"center",transition:"all .15s",opacity:s?1:0.45}},
+            h("div",{style:{fontSize:11,fontWeight:500,color:active?c:"#888580"}},p.label),
+            h("div",{style:{fontSize:9,color:"#444440",marginTop:1}},p.desc),
+            h("div",{className:"mono",style:{fontSize:26,fontWeight:500,color:s?c:"#333",marginTop:8,letterSpacing:"-0.02em"}},s?s.score_final?.toFixed(0):"—"),
+            h("div",{style:{fontSize:9,color:s?c:"#333",marginTop:2}},s?.clasificacion||"sin caché")
+          );
+        })
+      )
+    ),
+
+    // Top 10
+    !isDemo&&h("div",{style:{...C.card,marginBottom:12}},
+      h("div",{style:C.label},`🏆 Top 10 — Perfil ${PERFILES.find(p=>p.key===perfil)?.label||perfil}`),
+      loadingTop?h("div",{style:{color:"#444440",fontSize:11,textAlign:"center",padding:"16px 0"}},"Cargando ranking..."):
+      top10.length===0?h("div",{style:{color:"#444440",fontSize:11,textAlign:"center",padding:"16px 0"}},"Cargá más tickers con el warmup para ver el ranking"):
+      h("div",{style:{display:"flex",flexDirection:"column",gap:4}},
+        ...top10.map((row,i)=>{
+          const c=scoreColor(row.score_final);
+          const medals=["🥇","🥈","🥉"];
+          return h("div",{key:row.ticker,style:{display:"flex",alignItems:"center",gap:10,padding:"8px 10px",background:"rgba(255,255,255,0.02)",borderRadius:8,border:`0.5px solid rgba(255,255,255,0.05)`}},
+            h("div",{style:{fontSize:13,width:24,textAlign:"center"}},medals[i]||`${i+1}`),
+            h("div",{className:"mono",style:{fontSize:13,fontWeight:500,color:"#e8e5e0",flex:1}},row.ticker,row.es_cedear?h("span",{style:{fontSize:9,color:"#a78bfa",marginLeft:4}},"CEDEAR"):""),
+            h("div",{className:"mono",style:{fontSize:15,fontWeight:500,color:c}},row.score_final?.toFixed(1)),
+            h("span",{style:{fontSize:9,padding:"2px 8px",borderRadius:10,background:c+"18",color:c,border:`0.5px solid ${c}44`}},row.clasificacion)
+          );
+        })
+      )
+    ),
+
+    // Semáforo
+    h("div",{style:C.card},
+      h("div",{style:C.label},"Semáforo Macro · Contexto Dalio"),
+      h("div",{style:{display:"flex",flexDirection:"column",gap:6}},
+        ...semaforo.map((item,i)=>{
+          const sc=SEM[item.estado]||SEM.AMARILLO;
+          return h("div",{key:i,style:{display:"flex",alignItems:"center",gap:10,background:sc.bg,border:`0.5px solid ${sc.dot}22`,borderRadius:8,padding:"9px 12px"}},
+            h("div",{style:{width:7,height:7,borderRadius:"50%",background:sc.dot,flexShrink:0,boxShadow:`0 0 5px ${sc.dot}`}}),
+            h("div",{style:{flex:1,fontSize:11,fontWeight:500}},item.indicador),
+            h("div",{className:"mono",style:{fontSize:12,color:sc.dot,fontWeight:500}},item.valor_actual," ",h("span",{style:{fontSize:9,fontWeight:400,color:"#555550"}},item.unidad)),
+            h("div",{style:{fontSize:9,color:"#444440",textAlign:"right",maxWidth:180,lineHeight:1.4}},`${item.region} · ${item.notas}`)
+          );
+        })
+      )
+    ),
+
+    // Cache timestamp
+    current?.calculado_at&&!isDemo&&h("div",{style:{marginTop:12,textAlign:"center",fontSize:10,color:"#333"}},
+      `Calculado ${new Date(current.calculado_at).toLocaleString("es-AR")} · Expira ${new Date(current.expira_at).toLocaleString("es-AR")}`
+    ),
+
+    // ─── Toast stack: señales que entran en Realtime ──────────────────────
+    toasts.length>0 && h("div",{style:{
+      position:"fixed",bottom:18,right:18,display:"flex",flexDirection:"column",
+      gap:8,zIndex:300,pointerEvents:"none",maxWidth:320
+    }},
+      ...toasts.map(t=>{
+        const sigType = (t.signal_type||"").toUpperCase();
+        const tone = sigType.includes("BUY")||sigType.includes("ACCUM") ? "buy"
+                   : sigType.includes("SELL")||sigType.includes("REDUCE")||sigType.includes("AVOID") ? "sell"
+                   : sigType.includes("ANTI_PANIC")||sigType.includes("PANIC") ? "panic"
+                   : "hold";
+        const palette = {
+          buy:  {bg:"rgba(74,222,128,0.12)", bd:"rgba(74,222,128,0.45)", fg:"#4ade80"},
+          sell: {bg:"rgba(248,113,113,0.12)",bd:"rgba(248,113,113,0.45)",fg:"#f87171"},
+          panic:{bg:"rgba(167,139,250,0.14)",bd:"rgba(167,139,250,0.5)", fg:"#a78bfa"},
+          hold: {bg:"rgba(96,165,250,0.10)", bd:"rgba(96,165,250,0.35)", fg:"#60a5fa"},
+        }[tone];
+        return h("div",{key:t.id,style:{
+          background:palette.bg, border:`0.5px solid ${palette.bd}`,
+          borderRadius:11, padding:"11px 14px", color:palette.fg,
+          fontSize:11, lineHeight:1.5, pointerEvents:"auto",
+          backdropFilter:"blur(6px)",
+          animation:"horizontesToastIn .35s ease-out",
+          boxShadow:"0 6px 18px rgba(0,0,0,0.35)",
+        }},
+          h("div",{style:{display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,marginBottom:4}},
+            h("div",{style:{display:"flex",alignItems:"center",gap:6}},
+              h("span",{style:{width:6,height:6,borderRadius:"50%",background:palette.fg,animation:"horizontesPulse 2s ease-in-out infinite"}}),
+              h("span",{className:"mono",style:{fontSize:12,fontWeight:600,letterSpacing:".04em",color:"#e8e5e0"}},t.ticker),
+              h("span",{style:{fontSize:10,fontWeight:600,letterSpacing:".06em",color:palette.fg}},sigType)
+            ),
+            t.conviction!=null && h("span",{className:"mono",style:{fontSize:11,fontWeight:600,color:palette.fg}},`${Math.round(t.conviction)}/100`)
+          ),
+          h("div",{style:{fontSize:10,color:"#888580"}},
+            `Nueva señal · ${new Date(t.ts).toLocaleTimeString("es-AR",{hour:"2-digit",minute:"2-digit",second:"2-digit"})}`
+          )
+        );
+      })
+    ),
+
+    showCfg&&h(ConfigModal,{current:config,onSave:onCfgSave,onClose:()=>setShowCfg(false)})
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(h(App));
+</script>
+</body>
+</html>
