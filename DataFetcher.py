@@ -115,11 +115,19 @@ CEDEAR_RATIOS: dict[str, float] = {
     "SPY":    20.0,   # SPDR S&P 500                 BYMA 30/09/2025
 }
 
-# Mapa de excepciones: ticker BYMA → ticker yfinance cuando difieren.
-# Necesario cuando la CNV registra el CEDEAR con un código distinto al que
-# yfinance usa para el subyacente en NYSE/NASDAQ.
+# Mapa de excepciones: ticker de mercado local (BYMA/CNV) → ticker yfinance,
+# cuando difieren. Cubre dos casos:
+#   1) Subyacente de un CEDEAR (ej: BRKB en BYMA → BRK-B en yfinance/NYSE).
+#   2) Acción/ADR argentino cuyo ticker local no coincide con el que usa
+#      yfinance (ej: Pampa Energía cotiza en BYMA como "PAMP" pero su ADR
+#      en NYSE, que es lo que yfinance conoce, es "PAM").
+# Se aplica en fetch() ANTES de pedir los fundamentales (ver bug jul-2026:
+# antes solo se usaba para el precio del subyacente en _enrich_cedear,
+# dejando pasar el ticker sin mapear a la llamada de fundamentales, que
+# fallaba con "No data found, symbol may be delisted").
 CEDEAR_YFINANCE_MAP: dict[str, str] = {
     "BRKB": "BRK-B",   # Berkshire Hathaway B: BYMA → "BRKB", yfinance → "BRK-B"
+    "PAMP":  "PAM",    # Pampa Energía: BYMA → "PAMP", ADR NYSE/yfinance → "PAM"
 }
 
 # Tipo de cambio USD/ARS de fallback si el CCL no puede calcularse.
@@ -1006,6 +1014,13 @@ class DataFetcher:
         # Para CEDEARs, obtenemos los fundamentales del subyacente (sin .BA)
         base_ticker  = ticker_clean.replace(".BA", "") if is_cedear else ticker_clean
 
+        # Alias yfinance (fix jul-2026): resolver ANTES de pedir fundamentales.
+        # base_ticker se conserva sin mapear para CEDEAR_RATIOS y logs — solo
+        # el símbolo que se le pasa a yfinance cambia.
+        yf_ticker = CEDEAR_YFINANCE_MAP.get(base_ticker, base_ticker)
+        if yf_ticker != base_ticker:
+            log.info("[Alias] '%s' → yfinance '%s'", base_ticker, yf_ticker)
+
         log.info(
             "═══ Iniciando fetch para '%s' [fuente: %s, CEDEAR: %s] ═══",
             ticker_clean, self.config.source.value, is_cedear,
@@ -1013,9 +1028,9 @@ class DataFetcher:
 
         # ── Fetch según fuente ────────────────────────────────────────────
         if self.config.source == DataSource.YFINANCE:
-            metricas = self._fetch_yfinance(base_ticker)
+            metricas = self._fetch_yfinance(yf_ticker)
         elif self.config.source == DataSource.EODHD:
-            metricas = self._fetch_eodhd(base_ticker)
+            metricas = self._fetch_eodhd(yf_ticker)
         else:
             raise ValueError(f"DataSource desconocida: {self.config.source}")
 
