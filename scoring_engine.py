@@ -277,6 +277,23 @@ class ScoreBloque(BaseModel):
     detalle:     dict  = Field(description="Señales individuales usadas")
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Aviso legal (requisito ago-2026: Horizontes debe operar como producto de
+# software autoservicio, no como asesoramiento personalizado — ver decisión
+# de negocio del propietario). Va embebido como default en InvestmentScore,
+# NO como algo que cada consumidor deba recordar agregar: así es imposible
+# que un informe salga sin él, sea por dashboard, API, cache o cron.
+# ─────────────────────────────────────────────────────────────────────────────
+DISCLAIMER_HORIZONTES = (
+    "Este análisis fue generado de forma 100% automática por un modelo "
+    "cuantitativo (Horizontes) y tiene fines exclusivamente informativos y "
+    "educativos. No constituye asesoramiento financiero, recomendación de "
+    "inversión, ni una oferta de compra o venta de ningún instrumento. "
+    "Verificá la información de forma independiente y consultá con un "
+    "profesional matriculado antes de tomar decisiones de inversión."
+)
+
+
 class InvestmentScore(BaseModel):
     """Respuesta completa del ScoringEngine."""
     ticker:           str
@@ -290,6 +307,8 @@ class InvestmentScore(BaseModel):
     alertas:          list[str] = Field(default_factory=list)
     qmj_proxy:        Optional[float] = Field(None, description="Proxy QMJ 0-100 (None si datos insuficientes)")
     qmj_override_aplicado: bool = Field(False, description="True si el Hard Override QMJ capó el score en 65")
+    disclaimer:       str = Field(default=DISCLAIMER_HORIZONTES,
+                                  description="Aviso legal — se completa solo, nunca omitir en un consumidor nuevo")
 
 
 # ─────────────────────────────────────────────────────────────────────────────

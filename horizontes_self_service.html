@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Horizontes — Análisis de Inversión</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+  :root {
+    --bg: #0b0e14; --panel: #131826; --border: #232a3d;
+    --text: #e6e9f0; --muted: #8b93a7; --accent: #4f7cff;
+    --ok: #34c759; --warn: #ffb020; --bad: #ff4d4f;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font-family: -apple-system, "Segoe UI", Roboto, sans-serif;
+    display: flex; justify-content: center; padding: 40px 16px;
+  }
+  .card {
+    background: var(--panel); border: 1px solid var(--border);
+    border-radius: 12px; padding: 28px; max-width: 520px; width: 100%;
+  }
+  h1 { font-size: 20px; margin: 0 0 4px; }
+  .sub { color: var(--muted); font-size: 13px; margin-bottom: 24px; }
+  label { font-size: 13px; color: var(--muted); display: block; margin-bottom: 6px; }
+  input, select {
+    width: 100%; padding: 10px 12px; border-radius: 8px;
+    border: 1px solid var(--border); background: #0e1220; color: var(--text);
+    font-size: 14px; margin-bottom: 14px;
+  }
+  button {
+    width: 100%; padding: 11px; border-radius: 8px; border: none;
+    background: var(--accent); color: white; font-size: 14px; font-weight: 600;
+    cursor: pointer;
+  }
+  button:disabled { opacity: 0.5; cursor: not-allowed; }
+  button.secondary { background: transparent; border: 1px solid var(--border); color: var(--muted); }
+  .hidden { display: none !important; }
+  .result { margin-top: 20px; padding: 16px; border-radius: 10px; background: #0e1220; border: 1px solid var(--border); }
+  .score-num { font-size: 34px; font-weight: 700; }
+  .clase { font-size: 13px; padding: 3px 10px; border-radius: 999px; display: inline-block; font-weight: 600; }
+  .clase.STRONG_BUY, .clase.ACCUMULATE { background: rgba(52,199,89,0.15); color: var(--ok); }
+  .clase.HOLD { background: rgba(255,176,32,0.15); color: var(--warn); }
+  .clase.AVOID { background: rgba(255,77,79,0.15); color: var(--bad); }
+  .clase.SIN_DATOS { background: rgba(139,147,167,0.15); color: var(--muted); }
+  .disclaimer {
+    margin-top: 16px; padding: 12px; border-radius: 8px;
+    background: rgba(255,176,32,0.08); border: 1px solid rgba(255,176,32,0.25);
+    font-size: 11.5px; color: var(--muted); line-height: 1.5;
+  }
+  .quota { font-size: 12px; color: var(--muted); margin-top: 10px; text-align: right; }
+  .error-msg { color: var(--bad); font-size: 13px; margin-top: 10px; }
+  .alertas { margin-top: 12px; }
+  .alertas li { font-size: 12.5px; color: var(--muted); margin-bottom: 6px; list-style: none; }
+</style>
+</head>
+<body>
+
+<div class="card">
+  <h1>Horizontes</h1>
+  <p class="sub">Análisis de inversión automático · Graham · Lynch · Murphy · QMJ</p>
+
+  <!-- ── Login (visible sin sesión) ─────────────────────────────────── -->
+  <div id="login-panel">
+    <label for="email">Tu email</label>
+    <input id="email" type="email" placeholder="vos@ejemplo.com" />
+    <button id="btn-login">Enviarme un link de acceso</button>
+    <p id="login-msg" class="sub hidden"></p>
+  </div>
+
+  <!-- ── Formulario de análisis (visible con sesión) ────────────────── -->
+  <div id="app-panel" class="hidden">
+    <p class="sub" id="user-email"></p>
+
+    <label for="ticker">Ticker</label>
+    <input id="ticker" type="text" placeholder="AAPL, GOOGL.BA, GGAL..." autocomplete="off" />
+
+    <label for="perfil">Perfil de inversión</label>
+    <select id="perfil">
+      <option value="liquidez_plus">Liquidez Plus (&lt;1 año)</option>
+      <option value="conservador">Conservador (1-2 años)</option>
+      <option value="moderado" selected>Moderado (3-7 años)</option>
+      <option value="agresivo">Agresivo (10+ años)</option>
+    </select>
+
+    <button id="btn-analizar">Analizar</button>
+    <button id="btn-logout" class="secondary" style="margin-top:8px;">Cerrar sesión</button>
+
+    <div id="resultado" class="hidden"></div>
+    <p id="quota-info" class="quota"></p>
+  </div>
+</div>
+
+<script>
+// ═══════════════════════════════════════════════════════════════════
+// CONFIGURACIÓN — completar antes de publicar
+// ═══════════════════════════════════════════════════════════════════
+const SUPABASE_URL      = "https://hfrliueqvwnqmdehonvr.supabase.co";
+const SUPABASE_ANON_KEY = "PEGAR_ACA_TU_ANON_KEY_LEGACY_JWT";  // NO la service_role
+const API_BASE_URL      = "https://TU-API-DEPLOYADA.onrender.com"; // completar tras el deploy
+
+const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+const loginPanel = document.getElementById("login-panel");
+const appPanel   = document.getElementById("app-panel");
+const loginMsg   = document.getElementById("login-msg");
+const resultado  = document.getElementById("resultado");
+const quotaInfo  = document.getElementById("quota-info");
+
+// ── Sesión ──────────────────────────────────────────────────────────
+async function actualizarUI() {
+  const { data: { session } } = await sb.auth.getSession();
+  if (session) {
+    loginPanel.classList.add("hidden");
+    appPanel.classList.remove("hidden");
+    document.getElementById("user-email").textContent = `Sesión: ${session.user.email}`;
+    cargarCuota(session.access_token);
+  } else {
+    loginPanel.classList.remove("hidden");
+    appPanel.classList.add("hidden");
+  }
+}
+
+document.getElementById("btn-login").onclick = async () => {
+  const email = document.getElementById("email").value.trim();
+  if (!email) return;
+  const btn = document.getElementById("btn-login");
+  btn.disabled = true; btn.textContent = "Enviando...";
+  const { error } = await sb.auth.signInWithOtp({ email });
+  btn.disabled = false; btn.textContent = "Enviarme un link de acceso";
+  loginMsg.classList.remove("hidden");
+  loginMsg.textContent = error
+    ? `Error: ${error.message}`
+    : "Revisá tu email y hacé click en el link para entrar.";
+};
+
+document.getElementById("btn-logout").onclick = async () => {
+  await sb.auth.signOut();
+  actualizarUI();
+};
+
+sb.auth.onAuthStateChange((_event, _session) => actualizarUI());
+
+// ── Análisis on-demand ──────────────────────────────────────────────
+document.getElementById("btn-analizar").onclick = async () => {
+  const ticker = document.getElementById("ticker").value.trim().toUpperCase();
+  const perfil = document.getElementById("perfil").value;
+  if (!ticker) return;
+
+  const { data: { session } } = await sb.auth.getSession();
+  if (!session) { actualizarUI(); return; }
+
+  const btn = document.getElementById("btn-analizar");
+  btn.disabled = true; btn.textContent = "Analizando...";
+  resultado.classList.add("hidden");
+
+  try {
+    const resp = await fetch(`${API_BASE_URL}/score`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${session.access_token}`,
+      },
+      body: JSON.stringify({ ticker, perfil }),
+    });
+
+    if (resp.status === 401) {
+      await sb.auth.signOut();
+      actualizarUI();
+      return;
+    }
+    if (resp.status === 429) {
+      const body = await resp.json();
+      mostrarError(body.detail || "Alcanzaste tu límite diario de consultas.");
+      return;
+    }
+    if (!resp.ok) {
+      mostrarError("No pudimos completar el análisis. Intentá de nuevo en unos minutos.");
+      return;
+    }
+
+    const body = await resp.json();
+    if (body.status === "sin_datos") {
+      mostrarSinDatos(body);
+    } else {
+      mostrarScore(body);
+    }
+    cargarCuota(session.access_token);
+
+  } catch (e) {
+    mostrarError("No pudimos conectar con el servidor. Revisá tu conexión.");
+  } finally {
+    btn.disabled = false; btn.textContent = "Analizar";
+  }
+};
+
+function mostrarScore(body) {
+  const s = body.score;
+  const claseKey = s.clasificacion.replace(/ /g, "_");
+  resultado.className = "result";
+  resultado.innerHTML = `
+    <div class="score-num">${s.score_final.toFixed(1)}</div>
+    <span class="clase ${claseKey}">${s.clasificacion}</span>
+    ${body.cached ? '<span class="sub" style="margin-left:8px;">(caché)</span>' : ''}
+    <ul class="alertas">
+      ${(s.alertas || []).map(a => `<li>${escapeHtml(a)}</li>`).join("")}
+    </ul>
+    <div class="disclaimer">${escapeHtml(s.disclaimer)}</div>
+  `;
+  resultado.classList.remove("hidden");
+}
+
+function mostrarSinDatos(body) {
+  resultado.className = "result";
+  resultado.innerHTML = `
+    <span class="clase SIN_DATOS">SIN DATOS</span>
+    <p style="margin-top:10px;">${escapeHtml(body.mensaje)}</p>
+    <div class="disclaimer">${escapeHtml(body.disclaimer)}</div>
+  `;
+  resultado.classList.remove("hidden");
+}
+
+function mostrarError(msg) {
+  resultado.className = "result";
+  resultado.innerHTML = `<p class="error-msg">${escapeHtml(msg)}</p>`;
+  resultado.classList.remove("hidden");
+}
+
+async function cargarCuota(token) {
+  try {
+    const resp = await fetch(`${API_BASE_URL}/me/quota`, {
+      headers: { "Authorization": `Bearer ${token}` },
+    });
+    if (!resp.ok) return;
+    const q = await resp.json();
+    quotaInfo.textContent = `Plan ${q.plan} · ${q.consultas_hoy}/${q.limite} consultas hoy`;
+  } catch (e) { /* silencioso — no bloquear la UI por esto */ }
+}
+
+function escapeHtml(str) {
+  const div = document.createElement("div");
+  div.textContent = str;
+  return div.innerHTML;
+}
+
+actualizarUI();
+</script>
+</body>
+</html>

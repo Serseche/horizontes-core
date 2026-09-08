@@ -483,37 +483,48 @@ def calc_synthetic_health_score(
     return round(score, 2)
 
 
-def fetch_us_inflation_cpi(override: Optional[float] = None) -> float:
+def fetch_us_inflation_cpi(override: Optional[float] = None,
+                           http_get=None, timeout: float = 8.0,
+                           attempts: int = 2) -> float:
     """
-    Obtiene la inflación USA anualizada (CPI YoY).
-    Intenta FRED API (sin clave). Si falla, retorna el default hardcodeado.
+    Inflación USA anualizada (CPI YoY, decimal). Delega en fred_cpi_patch.py
+    (parsing endurecido: sesión Fable 5 jul-2026, aplicado ago-2026 — había
+    quedado pendiente en el resumen ejecutivo de esa sesión). Firma compatible
+    con la versión original; el override sigue funcionando igual.
     """
-    if override is not None:
-        return override
-
-    try:
-        url = (
-            "https://fred.stlouisfed.org/graph/fredgraph.csv"
-            "?id=CPIAUCSL&vintage_date="
-        )
-        # Fallback a valor por defecto si FRED no responde en 5s
-        resp = requests.get(url, timeout=5)
-        if resp.status_code == 200:
-            lines = resp.text.strip().splitlines()
-            if len(lines) > 12:
-                # Calculamos YoY con los últimos 13 valores (12 meses + 1)
-                recent   = float(lines[-1].split(",")[1])
-                year_ago = float(lines[-13].split(",")[1])
-                return round((recent - year_ago) / year_ago, 4)
-    except Exception as exc:
-        log.warning("No se pudo obtener CPI de FRED (%s). Usando default %.2f%%.", exc, INFLACION_US_DEFAULT * 100)
-
-    return INFLACION_US_DEFAULT
+    from fred_cpi_patch import fetch_us_inflation_cpi_v2
+    return fetch_us_inflation_cpi_v2(
+        override=override, http_get=http_get or requests.get,
+        timeout=timeout, attempts=attempts,
+    )
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 4. FETCHERS POR FUENTE
 # ─────────────────────────────────────────────────────────────────────────────
+
+class TickerSinDatosError(Exception):
+    """
+    Se lanza cuando la fuente de datos (yfinance/EODHD) no devuelve NADA
+    utilizable para un ticker tras agotar los reintentos — típicamente
+    porque el símbolo está mal escrito, deslistado, o no soportado por
+    la fuente. Antes de ago-2026 este caso se tragaba silenciosamente y
+    devolvía un MetricasFinancieras vacío, que el ScoringEngine terminaba
+    convirtiendo en un score 0.0/AVOID FALSO — indistinguible de un activo
+    real y objetivamente malo (ver bug BRKB/PAMP, causa distinta, mismo
+    síntoma). Ahora se propaga como excepción explícita para que cada
+    consumidor (runner batch, API self-service) decida cómo comunicarlo,
+    en vez de mentir con un número.
+    """
+    def __init__(self, ticker: str, fuente: str, detalle: str = ""):
+        self.ticker = ticker
+        self.fuente = fuente
+        self.detalle = detalle
+        msg = f"Sin datos para '{ticker}' en {fuente}."
+        if detalle:
+            msg += f" ({detalle})"
+        super().__init__(msg)
+
 
 def _fetch_yfinance_raw(ticker: str, attempts: int = 3, delay: float = 1.5) -> dict:
     """
@@ -551,8 +562,10 @@ def _fetch_yfinance_raw(ticker: str, attempts: int = 3, delay: float = 1.5) -> d
                 time.sleep(delay * attempt)
 
     log.error("[yFinance] No se pudo obtener datos para '%s' tras %d intentos.", ticker, attempts)
-    return {"info": {}, "history": pd.DataFrame(), "financials": pd.DataFrame(),
-            "balance_sheet": pd.DataFrame(), "cashflow": pd.DataFrame()}
+    raise TickerSinDatosError(
+        ticker=ticker, fuente="yfinance",
+        detalle=f"{attempts} intentos agotados, sin info ni historial de precios",
+    )
 
 
 def _fetch_eodhd_raw(ticker: str, api_key: str, attempts: int = 3, delay: float = 1.5) -> dict:
@@ -606,6 +619,12 @@ def _fetch_eodhd_raw(ticker: str, api_key: str, attempts: int = 3, delay: float 
             log.warning("[EODHD] Error intento %d para '%s': %s", attempt, ticker_eodhd, exc)
             if attempt < attempts:
                 time.sleep(delay * attempt)
+
+    if not fundamentals and not eod_prices:
+        raise TickerSinDatosError(
+            ticker=ticker_eodhd, fuente="EODHD",
+            detalle=f"{attempts} intentos agotados, sin fundamentales ni precios",
+        )
 
     return {"fundamentals": fundamentals, "eod_prices": eod_prices}
 
