@@ -127,7 +127,7 @@ document.getElementById("btn-login").onclick = async () => {
   if (!email) return;
   const btn = document.getElementById("btn-login");
   btn.disabled = true; btn.textContent = "Enviando...";
-  const { error } = await sb.auth.signInWithOtp({ email });
+  const { error } = await sb.auth.signInWithOtp({ email, options: { emailRedirectTo: window.location.href } });
   btn.disabled = false; btn.textContent = "Enviarme un link de acceso";
   loginMsg.classList.remove("hidden");
   loginMsg.textContent = error
