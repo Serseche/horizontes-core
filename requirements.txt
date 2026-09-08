@@ -9,3 +9,4 @@ numpy>=1.26
 requests>=2.31
 supabase>=2.4          # SIEMPRE claves legacy JWT eyJ..., no sb_secret_
 python-dotenv>=1.0
+python-multipart>=0.0.9   # requerido para /portfolio/import
