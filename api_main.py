@@ -80,6 +80,19 @@ app.add_middleware(
 # ─────────────────────────────────────────────────────────────────────────────
 
 SUPABASE_JWT_SECRET = os.environ.get("SUPABASE_JWT_SECRET", "")
+SUPABASE_URL_AUTH = os.environ.get("SUPABASE_URL", "").rstrip("/")
+
+# Proyectos nuevos de Supabase firman los tokens con claves asimétricas
+# (ES256) en vez del secreto legacy HS256. Para no depender de cuál
+# esquema usa este proyecto, validamos contra el JWKS público de Supabase
+# (funciona con ES256/RS256) y, si eso falla, probamos el secreto legacy
+# HS256 como respaldo.
+_jwks_client: Optional["pyjwt.PyJWKClient"] = None
+if SUPABASE_URL_AUTH:
+    try:
+        _jwks_client = pyjwt.PyJWKClient(f"{SUPABASE_URL_AUTH}/auth/v1/.well-known/jwks.json")
+    except Exception as exc:  # noqa: BLE001 — no debe tumbar el arranque de la API
+        log.warning("No se pudo inicializar el cliente JWKS de Supabase: %s", exc)
 
 
 class UsuarioAutenticado(BaseModel):
@@ -98,19 +111,35 @@ def verificar_usuario(authorization: str = Header(...)) -> UsuarioAutenticado:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Falta el header Authorization: Bearer <token>.")
     token = authorization.removeprefix("Bearer ").strip()
 
-    if not SUPABASE_JWT_SECRET:
-        raise HTTPException(
-            status.HTTP_500_INTERNAL_SERVER_ERROR,
-            "SUPABASE_JWT_SECRET no configurado en el servidor — no se puede validar sesiones.",
-        )
-    try:
-        payload = pyjwt.decode(
-            token, SUPABASE_JWT_SECRET, algorithms=["HS256"], audience="authenticated",
-        )
-    except pyjwt.ExpiredSignatureError:
-        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Sesión expirada, volvé a iniciar sesión.")
-    except pyjwt.InvalidTokenError as exc:
-        raise HTTPException(status.HTTP_401_UNAUTHORIZED, f"Token inválido: {exc}")
+    payload = None
+    errores = []
+
+    if _jwks_client is not None:
+        try:
+            signing_key = _jwks_client.get_signing_key_from_jwt(token)
+            payload = pyjwt.decode(
+                token, signing_key.key,
+                algorithms=["ES256", "RS256"],
+                audience="authenticated",
+            )
+        except pyjwt.ExpiredSignatureError:
+            raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Sesión expirada, volvé a iniciar sesión.")
+        except Exception as exc:  # noqa: BLE001 — probamos el fallback HS256 antes de fallar
+            errores.append(str(exc))
+
+    if payload is None and SUPABASE_JWT_SECRET:
+        try:
+            payload = pyjwt.decode(
+                token, SUPABASE_JWT_SECRET, algorithms=["HS256"], audience="authenticated",
+            )
+        except pyjwt.ExpiredSignatureError:
+            raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Sesión expirada, volvé a iniciar sesión.")
+        except pyjwt.InvalidTokenError as exc:
+            errores.append(str(exc))
+
+    if payload is None:
+        detalle = "; ".join(errores) if errores else "sin métodos de validación configurados"
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, f"Token inválido: {detalle}")
 
     return UsuarioAutenticado(user_id=payload["sub"], email=payload.get("email"))
 
