@@ -7,7 +7,7 @@
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <style>
   :root {
-    --bg: #0b0e14; --panel: #131826; --border: #232a3d;
+    --bg: #0b0e14; --panel: #131826; --panel2: #0e1220; --border: #232a3d;
     --text: #e6e9f0; --muted: #8b93a7; --accent: #4f7cff;
     --ok: #34c759; --warn: #ffb020; --bad: #ff4d4f;
   }
@@ -17,12 +17,17 @@
     font-family: -apple-system, "Segoe UI", Roboto, sans-serif;
     display: flex; justify-content: center; padding: 40px 16px;
   }
+  .wrap { max-width: 880px; width: 100%; }
   .card {
     background: var(--panel); border: 1px solid var(--border);
-    border-radius: 12px; padding: 28px; max-width: 520px; width: 100%;
+    border-radius: 12px; padding: 28px; width: 100%;
   }
-  h1 { font-size: 20px; margin: 0 0 4px; }
+  .brand { display: flex; align-items: center; gap: 12px; margin-bottom: 6px; }
+  .brand svg { flex-shrink: 0; }
+  h1 { font-size: 22px; margin: 0; }
+  .tagline { color: var(--muted); font-size: 13.5px; margin: 4px 0 0; line-height: 1.5; }
   .sub { color: var(--muted); font-size: 13px; margin-bottom: 24px; }
+  .metodologias { font-size: 12px; color: var(--muted); margin: 10px 0 24px; }
   label { font-size: 13px; color: var(--muted); display: block; margin-bottom: 6px; }
   input, select {
     width: 100%; padding: 10px 12px; border-radius: 8px;
@@ -37,29 +42,79 @@
   button:disabled { opacity: 0.5; cursor: not-allowed; }
   button.secondary { background: transparent; border: 1px solid var(--border); color: var(--muted); }
   .hidden { display: none !important; }
-  .result { margin-top: 20px; padding: 16px; border-radius: 10px; background: #0e1220; border: 1px solid var(--border); }
-  .score-num { font-size: 34px; font-weight: 700; }
-  .clase { font-size: 13px; padding: 3px 10px; border-radius: 999px; display: inline-block; font-weight: 600; }
+  .grid-horizontes {
+    display: grid; grid-template-columns: 1fr; gap: 14px; margin-top: 22px;
+  }
+  @media (min-width: 680px) {
+    .grid-horizontes { grid-template-columns: 1fr 1fr; }
+  }
+  .horizonte {
+    padding: 16px; border-radius: 10px; background: var(--panel2);
+    border: 1px solid var(--border);
+  }
+  .horizonte h3 { font-size: 12.5px; color: var(--muted); margin: 0 0 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.03em; }
+  .score-num { font-size: 30px; font-weight: 700; line-height: 1; }
+  .clase { font-size: 12.5px; padding: 3px 10px; border-radius: 999px; display: inline-block; font-weight: 600; margin-top: 6px; }
   .clase.STRONG_BUY, .clase.ACCUMULATE { background: rgba(52,199,89,0.15); color: var(--ok); }
   .clase.HOLD { background: rgba(255,176,32,0.15); color: var(--warn); }
   .clase.AVOID { background: rgba(255,77,79,0.15); color: var(--bad); }
   .clase.SIN_DATOS { background: rgba(139,147,167,0.15); color: var(--muted); }
+  .narrativa-titulo { font-size: 13.5px; font-weight: 600; margin: 12px 0 4px; }
+  .narrativa-mensaje { font-size: 12.5px; color: var(--muted); line-height: 1.5; margin: 0 0 10px; }
+  .bloques { margin: 10px 0 0; border-top: 1px solid var(--border); padding-top: 10px; }
+  .bloque-row {
+    display: flex; justify-content: space-between; font-size: 11.5px;
+    color: var(--muted); padding: 2px 0;
+  }
+  .bloque-row b { color: var(--text); font-weight: 500; }
+  .alertas { margin: 10px 0 0; padding-left: 0; }
+  .alertas li { font-size: 11.5px; color: var(--muted); margin-bottom: 5px; list-style: none; }
   .disclaimer {
-    margin-top: 16px; padding: 12px; border-radius: 8px;
+    margin-top: 20px; padding: 12px; border-radius: 8px;
     background: rgba(255,176,32,0.08); border: 1px solid rgba(255,176,32,0.25);
     font-size: 11.5px; color: var(--muted); line-height: 1.5;
   }
   .quota { font-size: 12px; color: var(--muted); margin-top: 10px; text-align: right; }
   .error-msg { color: var(--bad); font-size: 13px; margin-top: 10px; }
-  .alertas { margin-top: 12px; }
-  .alertas li { font-size: 12.5px; color: var(--muted); margin-bottom: 6px; list-style: none; }
+  .cached-tag { font-size: 10.5px; color: var(--muted); margin-left: 6px; }
+  .print-header { display: none; }
+
+  @media print {
+    body { padding: 0; background: white; color: #111; }
+    .wrap { max-width: 100%; }
+    .card { border: none; padding: 0; }
+    .brand, .tagline, .metodologias, #login-panel,
+    #ticker, label[for="ticker"], #btn-analizar, #btn-logout,
+    #btn-descargar, .quota, .error-msg { display: none !important; }
+    .print-header { display: block; margin-bottom: 18px; }
+    .print-header h2 { margin: 0 0 2px; font-size: 18px; }
+    .print-header p { margin: 0; font-size: 12px; color: #555; }
+    .horizonte { background: white; border: 1px solid #ccc; break-inside: avoid; }
+    .horizonte h3, .bloque-row span, .narrativa-mensaje, .alertas li, .cached-tag { color: #444 !important; }
+    .narrativa-titulo, .bloque-row b { color: #111 !important; }
+    .disclaimer { background: white; border: 1px solid #ccc; color: #444; }
+    .grid-horizontes { grid-template-columns: 1fr 1fr; }
+  }
 </style>
 </head>
 <body>
 
+<div class="wrap">
 <div class="card">
-  <h1>Horizontes</h1>
-  <p class="sub">Análisis de inversión automático · Graham · Lynch · Murphy · QMJ</p>
+  <div class="brand">
+    <svg width="34" height="34" viewBox="0 0 34 34" fill="none">
+      <circle cx="17" cy="17" r="16" stroke="#4f7cff" stroke-width="2"/>
+      <path d="M6 21 L13 13 L18 18 L28 8" stroke="#4f7cff" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+      <circle cx="28" cy="8" r="2.3" fill="#4f7cff"/>
+    </svg>
+    <h1>Horizontes</h1>
+  </div>
+  <p class="tagline">
+    Análisis de inversión 100% automático y objetivo: combinamos 4 metodologías
+    reconocidas en un solo score por ticker, calculado igual para todos —
+    sin sesgos, sin recomendaciones personalizadas, sin letra chica.
+  </p>
+  <p class="metodologias">Metodologías: Graham (seguridad del valor) · Lynch (crecimiento a precio razonable) · Murphy (momentum técnico) · Quality-Minus-Junk (calidad del negocio)</p>
 
   <!-- ── Login (visible sin sesión) ─────────────────────────────────── -->
   <div id="login-panel">
@@ -76,20 +131,18 @@
     <label for="ticker">Ticker</label>
     <input id="ticker" type="text" placeholder="AAPL, GOOGL.BA, GGAL..." autocomplete="off" />
 
-    <label for="perfil">Perfil de inversión</label>
-    <select id="perfil">
-      <option value="liquidez_plus">Liquidez Plus (&lt;1 año)</option>
-      <option value="conservador">Conservador (1-2 años)</option>
-      <option value="moderado" selected>Moderado (3-7 años)</option>
-      <option value="agresivo">Agresivo (10+ años)</option>
-    </select>
-
-    <button id="btn-analizar">Analizar</button>
+    <button id="btn-analizar">Analizar los 4 horizontes</button>
     <button id="btn-logout" class="secondary" style="margin-top:8px;">Cerrar sesión</button>
 
+    <div id="print-header" class="print-header">
+      <h2>Horizontes — Informe de análisis</h2>
+      <p id="print-meta"></p>
+    </div>
     <div id="resultado" class="hidden"></div>
+    <button id="btn-descargar" class="secondary hidden" style="margin-top:14px;">Descargar informe (PDF)</button>
     <p id="quota-info" class="quota"></p>
   </div>
+</div>
 </div>
 
 <script>
@@ -107,6 +160,34 @@ const appPanel   = document.getElementById("app-panel");
 const loginMsg   = document.getElementById("login-msg");
 const resultado  = document.getElementById("resultado");
 const quotaInfo  = document.getElementById("quota-info");
+const btnDescargar = document.getElementById("btn-descargar");
+const printMeta  = document.getElementById("print-meta");
+
+btnDescargar.onclick = () => window.print();
+
+// ── Traducciones de presentación (el contrato interno de la API sigue en
+//    inglés — esto es solo para mostrar en pantalla) ────────────────────
+const CLASIFICACION_ES = {
+  "STRONG BUY": "Comprar fuerte",
+  "ACCUMULATE": "Acumular",
+  "HOLD": "Mantener",
+  "AVOID": "Evitar",
+};
+
+const HORIZONTES_ORDEN = ["liquidez_plus", "conservador", "moderado", "agresivo"];
+const HORIZONTES_LABEL = {
+  liquidez_plus: "Liquidez Plus (&lt;1 año)",
+  conservador:   "Corto plazo (1-2 años)",
+  moderado:      "Mediano plazo (3-7 años)",
+  agresivo:      "Largo plazo (10+ años)",
+};
+
+const BLOQUE_LABEL = {
+  graham: "Graham",
+  lynch: "Lynch",
+  murphy: "Murphy",
+  investingpro: "Calidad (QMJ)",
+};
 
 // ── Sesión ──────────────────────────────────────────────────────────
 async function actualizarUI() {
@@ -142,10 +223,9 @@ document.getElementById("btn-logout").onclick = async () => {
 
 sb.auth.onAuthStateChange((_event, _session) => actualizarUI());
 
-// ── Análisis on-demand ──────────────────────────────────────────────
+// ── Análisis on-demand (los 4 horizontes de una sola vez) ────────────
 document.getElementById("btn-analizar").onclick = async () => {
   const ticker = document.getElementById("ticker").value.trim().toUpperCase();
-  const perfil = document.getElementById("perfil").value;
   if (!ticker) return;
 
   const { data: { session } } = await sb.auth.getSession();
@@ -154,15 +234,16 @@ document.getElementById("btn-analizar").onclick = async () => {
   const btn = document.getElementById("btn-analizar");
   btn.disabled = true; btn.textContent = "Analizando...";
   resultado.classList.add("hidden");
+  btnDescargar.classList.add("hidden");
 
   try {
-    const resp = await fetch(`${API_BASE_URL}/score`, {
+    const resp = await fetch(`${API_BASE_URL}/score/multi`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         "Authorization": `Bearer ${session.access_token}`,
       },
-      body: JSON.stringify({ ticker, perfil }),
+      body: JSON.stringify({ ticker }),
     });
 
     if (resp.status === 401) {
@@ -184,47 +265,80 @@ document.getElementById("btn-analizar").onclick = async () => {
     if (body.status === "sin_datos") {
       mostrarSinDatos(body);
     } else {
-      mostrarScore(body);
+      mostrarHorizontes(body);
     }
     cargarCuota(session.access_token);
 
   } catch (e) {
     mostrarError("No pudimos conectar con el servidor. Revisá tu conexión.");
   } finally {
-    btn.disabled = false; btn.textContent = "Analizar";
+    btn.disabled = false; btn.textContent = "Analizar los 4 horizontes";
   }
 };
 
-function mostrarScore(body) {
-  const s = body.score;
+function tarjetaHorizonte(perfilKey, item) {
+  const s = item.score;
   const claseKey = s.clasificacion.replace(/ /g, "_");
-  resultado.className = "result";
+  const claseEs = CLASIFICACION_ES[s.clasificacion] || s.clasificacion;
+  const narrativa = s.narrativa_housel || {};
+
+  const bloquesHtml = Object.entries(s.bloques || {}).map(([nombre, b]) => {
+    const label = BLOQUE_LABEL[nombre] || nombre;
+    return `<div class="bloque-row"><span>${escapeHtml(label)}</span><b>${b.score_bruto.toFixed(0)}pts · ${(b.peso * 100).toFixed(0)}%</b></div>`;
+  }).join("");
+
+  const alertasHtml = (s.alertas || []).length
+    ? `<ul class="alertas">${s.alertas.map(a => `<li>${escapeHtml(a)}</li>`).join("")}</ul>`
+    : "";
+
+  return `
+    <div class="horizonte">
+      <h3>${HORIZONTES_LABEL[perfilKey] || perfilKey}</h3>
+      <div class="score-num">${s.score_final.toFixed(1)}</div>
+      <span class="clase ${claseKey}">${escapeHtml(claseEs)}</span>
+      ${item.cached ? '<span class="cached-tag">(caché)</span>' : ''}
+      ${narrativa.titulo ? `<div class="narrativa-titulo">${escapeHtml(narrativa.titulo)}</div>` : ''}
+      ${narrativa.mensaje ? `<p class="narrativa-mensaje">${escapeHtml(narrativa.mensaje)}</p>` : ''}
+      <div class="bloques">${bloquesHtml}</div>
+      ${alertasHtml}
+    </div>
+  `;
+}
+
+function mostrarHorizontes(body) {
+  const disclaimer = Object.values(body.resultados)[0]?.score?.disclaimer || "";
+  const cardsHtml = HORIZONTES_ORDEN
+    .filter(k => body.resultados[k])
+    .map(k => tarjetaHorizonte(k, body.resultados[k]))
+    .join("");
+
   resultado.innerHTML = `
-    <div class="score-num">${s.score_final.toFixed(1)}</div>
-    <span class="clase ${claseKey}">${s.clasificacion}</span>
-    ${body.cached ? '<span class="sub" style="margin-left:8px;">(caché)</span>' : ''}
-    <ul class="alertas">
-      ${(s.alertas || []).map(a => `<li>${escapeHtml(a)}</li>`).join("")}
-    </ul>
-    <div class="disclaimer">${escapeHtml(s.disclaimer)}</div>
+    <div class="grid-horizontes">${cardsHtml}</div>
+    ${disclaimer ? `<div class="disclaimer">${escapeHtml(disclaimer)}</div>` : ''}
   `;
   resultado.classList.remove("hidden");
+
+  const fecha = new Date().toLocaleString("es-AR", { dateStyle: "medium", timeStyle: "short" });
+  printMeta.textContent = `Ticker: ${body.ticker} · Generado: ${fecha}`;
+  btnDescargar.classList.remove("hidden");
 }
 
 function mostrarSinDatos(body) {
-  resultado.className = "result";
   resultado.innerHTML = `
-    <span class="clase SIN_DATOS">SIN DATOS</span>
-    <p style="margin-top:10px;">${escapeHtml(body.mensaje)}</p>
+    <div class="horizonte">
+      <span class="clase SIN_DATOS">SIN DATOS</span>
+      <p style="margin-top:10px;">${escapeHtml(body.mensaje)}</p>
+    </div>
     <div class="disclaimer">${escapeHtml(body.disclaimer)}</div>
   `;
   resultado.classList.remove("hidden");
+  btnDescargar.classList.add("hidden");
 }
 
 function mostrarError(msg) {
-  resultado.className = "result";
   resultado.innerHTML = `<p class="error-msg">${escapeHtml(msg)}</p>`;
   resultado.classList.remove("hidden");
+  btnDescargar.classList.add("hidden");
 }
 
 async function cargarCuota(token) {

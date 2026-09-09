@@ -1308,6 +1308,49 @@ class CachedScoringPipeline:
         self._escribir_cache(score)
         return score, False
 
+    def get_score_multi(
+        self, ticker: str, perfiles: list[PerfilInversor], forzar_recalculo: bool = False
+    ) -> dict[str, tuple[InvestmentScore, bool]]:
+        """
+        Variante de get_score() para pedir varios perfiles del mismo ticker
+        en una sola llamada — pensada para el frontend self-service, que
+        muestra los 4 horizontes de inversión de una vez en vez de que el
+        usuario elija uno antes de analizar.
+
+        Reutiliza un único fetch de métricas crudas (yfinance/EODHD) para
+        todos los perfiles que no tengan caché vigente — evita golpear la
+        fuente de datos una vez por perfil (4x más lento y 4x más cuota de
+        la fuente externa sin necesidad, ya que las métricas del ticker no
+        cambian entre perfiles, solo el ponderado del score).
+
+        Devuelve {perfil.value: (InvestmentScore, was_cached)}. Si el
+        ticker no tiene datos, TickerSinDatosError se propaga una sola vez
+        (no tiene sentido reintentar el fetch por cada perfil pendiente).
+        """
+        ticker = ticker.strip().upper()
+        resultados: dict[str, tuple[InvestmentScore, bool]] = {}
+        pendientes: list[PerfilInversor] = []
+
+        if not forzar_recalculo:
+            for perfil in perfiles:
+                cached_row = self._leer_cache(ticker, perfil)
+                if cached_row is not None:
+                    resultados[perfil.value] = (self._row_to_score(cached_row), True)
+                else:
+                    pendientes.append(perfil)
+        else:
+            pendientes = list(perfiles)
+
+        if pendientes:
+            metricas = self.fetcher.fetch(ticker)  # una sola vez para todos los pendientes
+            for perfil in pendientes:
+                req = ScoringRequest(ticker=ticker, perfil=perfil, metricas=metricas)
+                score = self.engine.calcular(req)
+                self._escribir_cache(score)
+                resultados[perfil.value] = (score, False)
+
+        return resultados
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 9. CLI / EJEMPLO DE USO STANDALONE

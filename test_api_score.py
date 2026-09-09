@@ -49,15 +49,21 @@ def _score_dummy(ticker="AAPL") -> InvestmentScore:
 
 class _FakePipeline:
     """Reemplaza CachedScoringPipeline sin tocar Supabase real."""
-    def __init__(self, resultado=None, excepcion=None):
+    def __init__(self, resultado=None, excepcion=None, resultado_multi=None):
         self.resultado = resultado
         self.excepcion = excepcion
+        self.resultado_multi = resultado_multi
         self.use_cache = False   # cuota fail-open en estos tests
 
     def get_score(self, ticker, perfil):
         if self.excepcion:
             raise self.excepcion
         return self.resultado
+
+    def get_score_multi(self, ticker, perfiles):
+        if self.excepcion:
+            raise self.excepcion
+        return self.resultado_multi
 
 
 # ── Autenticación ────────────────────────────────────────────────────────────
@@ -134,6 +140,39 @@ def test_error_inesperado_devuelve_503_no_detalle_interno(monkeypatch):
                     headers={"Authorization": f"Bearer {tok}"})
     assert r.status_code == 503
     assert "boom interno" not in r.text  # no filtrar detalles internos al usuario
+
+
+# ── /score/multi (4 horizontes de una sola vez, 1 sola cuota) ────────────────
+
+def test_score_multi_ok_devuelve_los_4_horizontes(monkeypatch):
+    multi = {p.value: (_score_dummy(), False) for p in PerfilInversor}
+    monkeypatch.setattr(api_main, "_pipeline",
+                        lambda: _FakePipeline(resultado_multi=multi))
+    tok = _token()
+    r = client.post("/score/multi", json={"ticker": "AAPL"},
+                    headers={"Authorization": f"Bearer {tok}"})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["status"] == "ok"
+    assert body["ticker"] == "AAPL"
+    assert set(body["resultados"].keys()) == {p.value for p in PerfilInversor}
+
+
+def test_score_multi_sin_datos_devuelve_200_no_500(monkeypatch):
+    monkeypatch.setattr(
+        api_main, "_pipeline",
+        lambda: _FakePipeline(excepcion=TickerSinDatosError("ZZFANTASMA", "yfinance", "sin datos")),
+    )
+    tok = _token()
+    r = client.post("/score/multi", json={"ticker": "ZZFANTASMA"},
+                    headers={"Authorization": f"Bearer {tok}"})
+    assert r.status_code == 200
+    assert r.json()["status"] == "sin_datos"
+
+
+def test_score_multi_requiere_auth():
+    r = client.post("/score/multi", json={"ticker": "AAPL"})
+    assert r.status_code in (401, 422)
 
 
 # ── Salud ─────────────────────────────────────────────────────────────────────

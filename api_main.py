@@ -268,6 +268,63 @@ def score_ticker(
         )
 
 
+class ScoreMultiRequest(BaseModel):
+    ticker: str = Field(..., examples=["AAPL", "GOOGL.BA", "GGAL"])
+
+
+class ScoreMultiResponseOK(BaseModel):
+    status: str = "ok"
+    ticker: str
+    resultados: dict[str, ScoreResponseOK] = Field(
+        description="Clave = valor de PerfilInversor (liquidez_plus/conservador/moderado/agresivo)"
+    )
+
+
+@app.post("/score/multi", response_model=None)
+def score_ticker_multi(
+    req: ScoreMultiRequest,
+    usuario: UsuarioAutenticado = Depends(verificar_usuario),
+):
+    """
+    Variante de /score que devuelve los 4 horizontes de inversión de una
+    sola vez para el mismo ticker (liquidez_plus, conservador, moderado,
+    agresivo) — pensada para el frontend self-service, que ya no obliga al
+    usuario a elegir un horizonte antes de analizar.
+
+    Consume UN SOLO turno de la cuota diaria del usuario, sin importar que
+    devuelva 4 resultados — el usuario paga por consultar un ticker, no por
+    cuántos horizontes se calculan sobre él.
+    """
+    pipeline = _pipeline()
+    _verificar_y_consumir_cuota(pipeline, usuario.user_id)
+
+    try:
+        crudo = pipeline.get_score_multi(req.ticker, list(PerfilInversor))
+        resultados = {
+            perfil_value: ScoreResponseOK(cached=was_cached, score=score)
+            for perfil_value, (score, was_cached) in crudo.items()
+        }
+        return ScoreMultiResponseOK(ticker=req.ticker.strip().upper(), resultados=resultados)
+
+    except TickerSinDatosError as exc:
+        log.info("Sin datos (multi) para %s (usuario %s): %s", req.ticker, usuario.user_id, exc)
+        return ScoreResponseSinDatos(
+            ticker=req.ticker.strip().upper(),
+            mensaje=(
+                f"No pudimos obtener datos de mercado para '{req.ticker.strip().upper()}'. "
+                "Puede estar mal escrito, deslistado, o no soportado todavía. "
+                "Revisá el símbolo e intentá de nuevo."
+            ),
+        )
+
+    except Exception as exc:  # noqa: BLE001 — nunca devolver un 500 crudo al usuario final
+        log.error("Error inesperado scoring múltiple %s para %s: %s", req.ticker, usuario.user_id, exc)
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            "No pudimos completar el análisis en este momento. Intentá de nuevo en unos minutos.",
+        )
+
+
 @app.get("/me/quota")
 def mi_cuota(usuario: UsuarioAutenticado = Depends(verificar_usuario)):
     """El usuario puede ver su propio consumo — transparencia sin soporte manual."""
