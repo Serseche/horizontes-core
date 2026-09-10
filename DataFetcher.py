@@ -309,6 +309,111 @@ def calc_interest_coverage(financials: pd.DataFrame) -> Optional[float]:
     return None
 
 
+def calc_current_ratio_from_balance(balance: pd.DataFrame) -> Optional[float]:
+    """
+    Current Ratio = Total Current Assets / Total Current Liabilities,
+    calculado directo del Balance Sheet de yfinance.
+
+    Fallback añadido sept-2026: `info.get("currentRatio")` (módulo
+    'financialData' de Yahoo) dejó de ser confiable — Yahoo restringió/quitó
+    varios campos de ese módulo durante 2025 (ver también pegRatio, más abajo).
+    El Balance Sheet crudo (income/balance statements) sigue funcionando
+    porque es un endpoint distinto — el mismo que ya usan calc_roic/
+    calc_roc_magic_formula/calc_interest_coverage.
+    """
+    if balance is None or balance.empty:
+        return None
+    try:
+        col = balance.columns[0]
+        rows = balance.index.str.lower()
+
+        cur_a = None
+        for label in ["total current assets", "current assets"]:
+            m = [i for i, r in enumerate(rows) if label in r]
+            if m:
+                cur_a = _safe_float(balance.iloc[m[0]][col])
+                break
+
+        cur_l = None
+        for label in ["total current liabilities", "current liabilities"]:
+            m = [i for i, r in enumerate(rows) if label in r]
+            if m:
+                cur_l = _safe_float(balance.iloc[m[0]][col])
+                break
+
+        if cur_a is not None and cur_l is not None and cur_l != 0:
+            return round(cur_a / cur_l, 2)
+    except Exception as exc:
+        log.warning("Error calculando current_ratio desde balance: %s", exc)
+    return None
+
+
+def calc_debt_equity_from_balance(balance: pd.DataFrame) -> Optional[float]:
+    """
+    Deuda/Equity = Total Debt / Total Stockholders Equity, calculado directo
+    del Balance Sheet. Mismo fallback que calc_current_ratio_from_balance:
+    `info.get("debtToEquity")` (también 'financialData') es igual de frágil.
+    """
+    if balance is None or balance.empty:
+        return None
+    try:
+        col = balance.columns[0]
+        rows = balance.index.str.lower()
+
+        debt = None
+        for label in ["total debt", "long term debt"]:
+            m = [i for i, r in enumerate(rows) if label in r]
+            if m:
+                debt = _safe_float(balance.iloc[m[0]][col])
+                break
+
+        equity = None
+        for label in ["total stockholder equity", "stockholders equity", "total equity"]:
+            m = [i for i, r in enumerate(rows) if label in r]
+            if m:
+                equity = _safe_float(balance.iloc[m[0]][col])
+                break
+
+        if debt is not None and equity is not None and equity != 0:
+            return round(debt / equity, 4)
+    except Exception as exc:
+        log.warning("Error calculando debt_equity desde balance: %s", exc)
+    return None
+
+
+def calc_eps_growth_from_financials(financials: pd.DataFrame) -> Optional[float]:
+    """
+    Crecimiento BPA YoY real (no estimado), calculado con dos columnas
+    anuales del Income Statement: (EPS_actual - EPS_año_previo) / |EPS_año_previo|.
+
+    Fallback añadido sept-2026: `info.get("trailingEps")`/`forwardEps`
+    (módulos 'defaultKeyStatistics'/'earningsTrend') resultaron intermitentes
+    en producción — mismo síntoma que pegRatio. El BPA real de los últimos
+    dos ejercicios anuales, tomado del propio Income Statement, es la fuente
+    más estable disponible sin depender de estimaciones de analistas.
+    """
+    if financials is None or financials.empty or len(financials.columns) < 2:
+        return None
+    try:
+        rows = financials.index.str.lower()
+        eps_row = None
+        for label in ["basic eps", "diluted eps"]:
+            m = [i for i, r in enumerate(rows) if label in r]
+            if m:
+                eps_row = m[0]
+                break
+        if eps_row is None:
+            return None
+
+        eps_actual = _safe_float(financials.iloc[eps_row][financials.columns[0]])
+        eps_previo = _safe_float(financials.iloc[eps_row][financials.columns[1]])
+        if eps_actual is not None and eps_previo is not None and eps_previo != 0:
+            return round(((eps_actual - eps_previo) / abs(eps_previo)) * 100, 2)
+    except Exception as exc:
+        log.warning("Error calculando crecimiento BPA desde financials: %s", exc)
+    return None
+
+
 def calc_roic(info: dict, balance: pd.DataFrame, financials: pd.DataFrame) -> Optional[float]:
     """
     ROIC = NOPAT / Invested Capital
@@ -662,8 +767,19 @@ def _map_yfinance_to_metricas(raw: dict, ticker: str, config: FetchConfig) -> Me
     roe_val = round(roe_raw * 100, 2) if roe_raw is not None else None
 
     # ── Deuda/Equity: yfinance lo da como % (ej: 150 → 1.50 D/E) ────────
+    # Fallback sept-2026: info.get("debtToEquity") (módulo 'financialData' de
+    # Yahoo) viene devolviendo None de forma sistemática desde 2025 — mismo
+    # patrón documentado para pegRatio (yfinance#2569/#2570). Si falla, se
+    # recalcula directo del Balance Sheet (fuente que sí sigue funcionando).
     de_raw  = _safe_float(info.get("debtToEquity"))
     de_val  = round(de_raw / 100, 4) if de_raw is not None else None
+    if de_val is None:
+        de_val = calc_debt_equity_from_balance(bal)
+
+    # ── Current Ratio: mismo fallback — 'financialData' poco confiable ────
+    current_r = _safe_float(info.get("currentRatio"))
+    if current_r is None:
+        current_r = calc_current_ratio_from_balance(bal)
 
     # ── P/B Ratio ────────────────────────────────────────────────────────
     pb_raw  = _safe_float(info.get("priceToBook"))
@@ -709,6 +825,13 @@ def _map_yfinance_to_metricas(raw: dict, ticker: str, config: FetchConfig) -> Me
         log.warning("Error calculando FCF Score: %s", exc)
 
     # ── Crecimiento BPA YoY ───────────────────────────────────────────────
+    # Fallback sept-2026: info.get("trailingEps")/"forwardEps" (módulos
+    # 'defaultKeyStatistics'/'earningsTrend') vienen ausentes en producción
+    # con la misma frecuencia que pegRatio y currentRatio — todos campos de
+    # los módulos quoteSummary que Yahoo restringió durante 2025. Si el
+    # estimado forward no está disponible, se usa el crecimiento BPA REAL
+    # interanual del Income Statement (más confiable, aunque es histórico
+    # y no una proyección).
     crec_bpa = None
     try:
         eps_cur  = _safe_float(info.get("trailingEps"))
@@ -717,9 +840,35 @@ def _map_yfinance_to_metricas(raw: dict, ticker: str, config: FetchConfig) -> Me
             crec_bpa = round(((eps_fwd - eps_cur) / abs(eps_cur)) * 100, 2)
     except Exception:
         pass
+    if crec_bpa is None:
+        crec_bpa = calc_eps_growth_from_financials(fins)
+
+    # ── P/E Ratio ────────────────────────────────────────────────────────
+    # Fallback: si trailingPE/forwardPE (también 'summaryDetail'/'defaultKey
+    # Statistics') no vienen, se calcula Precio / EPS actual del Income
+    # Statement — mismo criterio que el resto de los fallbacks de esta función.
+    pe_val = _safe_float(info.get("trailingPE") or info.get("forwardPE"))
+    if pe_val is None and precio and not fins.empty:
+        try:
+            rows_f = fins.index.str.lower()
+            m = [i for i, r in enumerate(rows_f) if "basic eps" in r or "diluted eps" in r]
+            if m:
+                eps_actual = _safe_float(fins.iloc[m[0]][fins.columns[0]])
+                if eps_actual and eps_actual > 0:
+                    pe_val = round(precio / eps_actual, 2)
+        except Exception as exc:
+            log.warning("Error calculando P/E fallback: %s", exc)
+
+    # ── PEG Ratio ────────────────────────────────────────────────────────
+    # Yahoo eliminó pegRatio de su API en jun-2025 (confirmado — yfinance
+    # issues #2569/#2570: "PEG ratio missing from yfinance.info since June
+    # 2025"). Se reconstruye con la fórmula original de Lynch:
+    # PEG = P/E ÷ tasa de crecimiento BPA (%, número entero — no decimal).
+    peg_val = _safe_float(info.get("pegRatio"))
+    if peg_val is None and pe_val and crec_bpa and crec_bpa > 0:
+        peg_val = round(pe_val / crec_bpa, 2)
 
     # ── Health Score sintético ────────────────────────────────────────────
-    current_r = _safe_float(info.get("currentRatio"))
     health_s  = None
     if config.calc_synthetic_health:
         health_s = calc_synthetic_health_score(
@@ -735,7 +884,7 @@ def _map_yfinance_to_metricas(raw: dict, ticker: str, config: FetchConfig) -> Me
     # ── Ensamblar MetricasFinancieras ─────────────────────────────────────
     return MetricasFinancieras(
         # Graham
-        pe_ratio          = _safe_float(info.get("trailingPE") or info.get("forwardPE")),
+        pe_ratio          = pe_val,
         pb_ratio          = pb_raw,
         ev_ebitda         = _safe_float(info.get("enterpriseToEbitda")),
         current_ratio     = current_r,
@@ -754,7 +903,7 @@ def _map_yfinance_to_metricas(raw: dict, ticker: str, config: FetchConfig) -> Me
         precio_vs_sma50   = tech["precio_vs_sma50"],
         volumen_relativo  = tech["volumen_relativo"],
         # Lynch
-        peg_ratio         = _safe_float(info.get("pegRatio")),
+        peg_ratio         = peg_val,
         crecimiento_bpa   = crec_bpa,
         roc               = roc_val,
         # CEDEAR (se enriquece en etapa posterior)
