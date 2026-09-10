@@ -153,6 +153,17 @@ const SUPABASE_URL      = "https://hfrliueqvwnqmdehonvr.supabase.co";
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImhmcmxpdWVxdnducW1kZWhvbnZyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzY3MTI1OTUsImV4cCI6MjA5MjI4ODU5NX0.NFPAHHkx5yAaow1UcJWmZNdNy98yhfyYbRQzLCbc6ro";
 const API_BASE_URL      = "https://horizontes-core.onrender.com";
 
+// Reparo defensivo (sept-2026): si la URL llegó con un "##" al principio del
+// hash (ver bug de emailRedirectTo más abajo), el cliente de Supabase no
+// reconoce el access_token y la página se queda para siempre en el login,
+// aunque el link "se vea" válido. Si detectamos ese patrón, lo arreglamos
+// ANTES de que se cree el cliente — así incluso un link viejo, ya roto,
+// termina autenticando en vez de quedar trabado.
+if (window.location.hash.startsWith("##")) {
+  const hashLimpio = window.location.hash.slice(1); // deja un solo "#"
+  history.replaceState(null, "", window.location.pathname + window.location.search + hashLimpio);
+}
+
 const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 const loginPanel = document.getElementById("login-panel");
@@ -208,7 +219,14 @@ document.getElementById("btn-login").onclick = async () => {
   if (!email) return;
   const btn = document.getElementById("btn-login");
   btn.disabled = true; btn.textContent = "Enviando...";
-  const { error } = await sb.auth.signInWithOtp({ email, options: { emailRedirectTo: window.location.href } });
+  // Usamos origin + pathname (sin hash ni query) en vez de window.location.href:
+  // si la URL actual llegó a tener un "#" colgando de un intento de login previo
+  // (magic link ya usado, error, etc.), href lo arrastra tal cual, y Supabase le
+  // agrega su propio "#access_token=..." encima → URL final con "##access_token="
+  // que el cliente no puede parsear (bug detectado sept-2026: quedaba en el login
+  // para siempre con un link que parecía válido pero nunca autenticaba).
+  const redirectUrl = window.location.origin + window.location.pathname;
+  const { error } = await sb.auth.signInWithOtp({ email, options: { emailRedirectTo: redirectUrl } });
   btn.disabled = false; btn.textContent = "Enviarme un link de acceso";
   loginMsg.classList.remove("hidden");
   loginMsg.textContent = error
